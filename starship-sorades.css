@@ -1,0 +1,124 @@
+* {
+	color: #EEE;
+	font-family: Consolas, monospace;
+}
+html, body {
+	/* I tried to use a gradient in the background but it doesn't look good */
+	background: #111;
+	height: 100%;
+	margin: 0;
+	/* This avoids the page scrolling up when pressing the cursor keys */
+	overflow: hidden;
+	padding: 0;
+	text-align: center;
+	width: 100%;
+}
+a:hover {
+	background: #FFF;
+	color: #000;
+	text-decoration: none;
+}
+#container, canvas {
+	display: block;
+	margin: auto;
+	/* WebKit browsers support max-height: 100% but I removed it because of layout issues */
+	max-width: 100%;
+}
+canvas {
+	background: #000;
+	/* I hat to remove the box-shadow because it made th game very slow in Opera */
+}
+/* The description is placed under the canvas by default */
+#desc {
+	background: #10161C;
+	background-image: -webkit-linear-gradient(#000 -8px, #10161C 16px);
+	background-image: -moz-linear-gradient(#000 -8px, #10161C 16px);
+	background-image: -o-linear-gradient(#000 -8px, #10161C 16px);
+	background-image: linear-gradient(#000 -8px, #10161C 16px);
+	border: 1px solid #234563;
+	border-radius: 0 0 .4em .4em;
+	border-top-style: none;
+	margin: 0 auto;
+	max-width: 990px;
+	padding: .6em 16px;
+	text-shadow: 0 1px 2px #000;
+}
+.note {
+	font-size: smaller;
+	margin: 0 0 1.5em;
+}
+svg {
+	/* WebKit browsers aren't able to scale the SVG properly when the height is missing */
+	height: 24px;
+	width: 24px;
+	vertical-align: top;
+}
+form {
+	margin: 0;
+	padding: 0;
+}
+input {
+	background: #1A2A39;
+	background-color: rgba(50, 100, 145, .2);
+	border: 1px solid #234563;
+	font-size: 100%;
+	width: 37em;
+}
+/* This set of media queries adjust the vertical alignment of the canvas */
+@media all and (min-height: 784px) {
+	#container {
+		padding-top: 8px;
+	}
+}
+@media all and (min-height: 800px) {
+	#container {
+		padding-top: 16px;
+	}
+}
+@media all and (min-height: 832px) {
+	#container {
+		padding-top: 32px;
+	}
+}
+@media all and (min-height: 896px) {
+	#container {
+		padding-top: 64px;
+	}
+}
+@media all and (min-height: 1024px) {
+	#container {
+		padding-top: 128px;
+	}
+}
+/* Move the description to the left if there is enough space */
+@media all and (min-width: 1176px) {
+	#container {
+		width: 1176px;
+	}
+	canvas {
+		float: right;
+		margin-left: 16px;
+	}
+	#desc {
+		background-image: -webkit-linear-gradient(left, #10161C 136px, #000 160px);
+		background-image: -moz-linear-gradient(left, #10161C 136px, #000 160px);
+		background-image: -o-linear-gradient(left, #10161C 136px, #000 160px);
+		background-image: linear-gradient(left, #10161C 136px, #000 160px);
+		border-radius: .4em;
+		border-style: solid;
+		margin: 0;
+		padding-top: 1.5em;
+		text-align: right;
+	}
+	.note, a.logo {
+		display: block;
+	}
+	a.logo:hover {
+		background: none;
+	}
+	svg {
+		height: 64px;
+		margin: 0 86px -32px -32px;
+		width: 64px;
+	}
+}
