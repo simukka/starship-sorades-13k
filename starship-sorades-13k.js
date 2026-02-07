@@ -15,8 +15,121 @@
  * - createPattern for efficient background rendering
  * - Swap-and-pop for O(1) array removals
  * - Web Audio API for low-latency sound
+ * - Seeded PRNG for deterministic level generation
  * ============================================================================
  */
+
+// =============================================================================
+// SECTION: Seeded Pseudo-Random Number Generator
+// =============================================================================
+
+/**
+ * Mulberry32 - A fast, high-quality 32-bit seeded PRNG.
+ * Produces deterministic sequences for reproducible gameplay.
+ * Used for enemy spawning, movement patterns, and shooting timers.
+ * 
+ * @class
+ */
+class SeededRNG {
+    /**
+     * Creates a new seeded random number generator.
+     * 
+     * @param {number} seed - Initial seed value (32-bit integer)
+     */
+    constructor(seed = Date.now()) {
+        /** @type {number} Current state of the generator */
+        this.state = seed >>> 0; // Ensure unsigned 32-bit
+        /** @type {number} Original seed for reset */
+        this.initialSeed = this.state;
+    }
+
+    /**
+     * Sets a new seed and resets the generator state.
+     * 
+     * @param {number} seed - New seed value
+     */
+    setSeed(seed) {
+        this.state = seed >>> 0;
+        this.initialSeed = this.state;
+    }
+
+    /**
+     * Resets the generator to its initial seed.
+     * Useful for replaying the same sequence.
+     */
+    reset() {
+        this.state = this.initialSeed;
+    }
+
+    /**
+     * Generates the next random number in the sequence.
+     * Uses Mulberry32 algorithm for high-quality distribution.
+     * 
+     * @returns {number} Random float between 0 (inclusive) and 1 (exclusive)
+     */
+    random() {
+        // Mulberry32 algorithm
+        let t = this.state += 0x6D2B79F5;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+
+    /**
+     * Generates a random integer in the specified range.
+     * 
+     * @param {number} min - Minimum value (inclusive)
+     * @param {number} max - Maximum value (exclusive)
+     * @returns {number} Random integer in [min, max)
+     */
+    randomInt(min, max) {
+        return Math.floor(this.random() * (max - min)) + min;
+    }
+
+    /**
+     * Generates a random float in the specified range.
+     * 
+     * @param {number} min - Minimum value (inclusive)
+     * @param {number} max - Maximum value (exclusive)
+     * @returns {number} Random float in [min, max)
+     */
+    randomFloat(min, max) {
+        return this.random() * (max - min) + min;
+    }
+
+    /**
+     * Generates a seed for a specific level.
+     * Combines a base game seed with the level number for unique but
+     * reproducible level generation.
+     * 
+     * @param {number} baseSeed - Base game seed
+     * @param {number} levelNumber - Current level/wave number
+     * @returns {number} Deterministic seed for the level
+     */
+    static levelSeed(baseSeed, levelNumber) {
+        // Mix the seeds using a simple hash
+        let seed = baseSeed ^ (levelNumber * 2654435761);
+        seed = Math.imul(seed ^ (seed >>> 16), 0x85ebca6b);
+        seed = Math.imul(seed ^ (seed >>> 13), 0xc2b2ae35);
+        return (seed ^ (seed >>> 16)) >>> 0;
+    }
+}
+
+/**
+ * Global seeded RNG instance for gameplay-affecting randomness.
+ * This ensures deterministic enemy behavior based on level seed.
+ * 
+ * @type {SeededRNG}
+ */
+const gameRNG = new SeededRNG();
+
+/**
+ * Base seed for the current game session.
+ * Used to generate level-specific seeds.
+ * 
+ * @type {number}
+ */
+let gameSeed = Date.now();
 
 // =============================================================================
 // SECTION: Object Pool Implementation
@@ -235,6 +348,8 @@ const l = {
     level: 0,
     /** @type {boolean} Whether game is paused */
     paused: false,
+    /** @type {number} Current level's seed for deterministic spawning */
+    levelSeed: 0,
     
     // --- Text Display System ---
     text: {
@@ -665,13 +780,14 @@ function explode(x, y, size) {
 /**
  * Spawns a bonus item at the specified position.
  * Bonus types: '+' (weapon), 'E' (energy), 'S' (shield), 'B' (bomb), '10' (points)
+ * Uses seeded RNG for deterministic bonus drops.
  * 
  * @param {Object} source - Source object with position and velocity
  * @param {string} [type] - Bonus type (random if not specified)
  */
 function spawnBonus(source, type) {
     if (!type) {
-        const r = Math.random();
+        const r = gameRNG.random();
         // 10% chance each for special bonuses, rest is money
         type = r > 0.9 ? '+' : (r > 0.8 ? 'E' : (r > 0.7 ? 'S' : (r > 0.6 ? 'B' : '10')));
     }
@@ -700,7 +816,7 @@ function spawnBonus(source, type) {
     item.type = type;
     item.x = source.x || l.WIDTH / 2;
     item.y = source.y || -bonus.R;
-    item.xAcc = source.xAcc ? source.xAcc / 2 : Math.random() * l.SPEED - l.SPEED / 2;
+    item.xAcc = source.xAcc ? source.xAcc / 2 : gameRNG.randomFloat(-l.SPEED / 2, l.SPEED / 2);
     item.yAcc = (source.yAcc ? source.yAcc / 2 : 0) + l.SPEED / 2;
 }
 
@@ -1030,17 +1146,17 @@ enemies.TYPES = [
         
         spawn: function(yOffset) {
             for (let i = 2 + l.level; i--; ) {
-                const yStop = l.HEIGHT / 8 + Math.random() * l.HEIGHT / 4 | 0;
+                const yStop = l.HEIGHT / 8 + gameRNG.random() * l.HEIGHT / 4 | 0;
                 enemies.push({
                     image: this.image,
-                    x: this.R + (l.WIDTH - this.R * 2) * Math.random() | 0,
+                    x: this.R + (l.WIDTH - this.R * 2) * gameRNG.random() | 0,
                     y: yOffset ? yStop + yOffset : -this.R,
                     yStop: yStop,
                     r: this.R,
                     angle: 0,
                     maxAngle: Math.PI / 32,
                     e: 12 + l.level,
-                    t: Math.random() * 120 | 0,
+                    t: gameRNG.randomInt(0, 120),
                     shoot: this.shoot
                 });
             }
@@ -1084,17 +1200,17 @@ enemies.TYPES = [
         
         spawn: function(yOffset) {
             for (let i = 1 + l.level; i--; ) {
-                const yStop = l.HEIGHT / 8 + Math.random() * l.HEIGHT / 4 | 0;
+                const yStop = l.HEIGHT / 8 + gameRNG.random() * l.HEIGHT / 4 | 0;
                 enemies.push({
                     image: this.image,
-                    x: this.R + (l.WIDTH - this.R * 2) * Math.random() | 0,
+                    x: this.R + (l.WIDTH - this.R * 2) * gameRNG.random() | 0,
                     y: yOffset ? yStop + yOffset : -this.R,
                     yStop: yStop,
                     r: this.R,
                     angle: 0,
                     maxAngle: Math.PI / 16,
                     e: 20 + l.level * 2,
-                    t: Math.random() * 120 | 0,
+                    t: gameRNG.randomInt(0, 120),
                     shoot: this.shoot
                 });
             }
@@ -1162,15 +1278,15 @@ enemies.TYPES = [
             for (let i = l.level; i--; ) {
                 enemies.push({
                     image: this.image,
-                    x: l.WIDTH / 4 + l.WIDTH / 2 * Math.random() | 0,
+                    x: l.WIDTH / 4 + l.WIDTH / 2 * gameRNG.random() | 0,
                     y: i * yStep + (yOffset || -this.R),
                     yStop: l.HEIGHT / 2 | 0,
                     r: this.R,
                     angle: 0,
                     maxAngle: Math.PI * 32,
                     e: 28 + l.level * 3,
-                    t: Math.random() * 30 | 0,
-                    fireDirection: Math.random() * Math.PI,
+                    t: gameRNG.randomInt(0, 30),
+                    fireDirection: gameRNG.random() * Math.PI,
                     tActive: 0,
                     shoot: this.shoot
                 });
@@ -1245,7 +1361,7 @@ enemies.TYPES = [
                 angle: 0,
                 maxAngle: Math.PI / 8,
                 e: e,
-                t: tStart + Math.random() * 30 | 0,
+                t: tStart + gameRNG.randomInt(0, 30),
                 shoot: this.shoot
             });
             
@@ -1270,7 +1386,7 @@ enemies.TYPES = [
                         angle: 0,
                         maxAngle: Math.PI / 8,
                         e: e / 2 | 0,
-                        t: tStart + Math.random() * 30 | 0,
+                        t: tStart + gameRNG.randomInt(0, 30),
                         shoot: this.shoot
                     });
                 }
@@ -1282,8 +1398,8 @@ enemies.TYPES = [
         },
         
         shoot: function(angle) {
-            // Random timing, aimed at player
-            this.t = Math.random() * 6 * 30 | 0;
+            // Deterministic timing based on level seed, aimed at player
+            this.t = gameRNG.randomInt(0, 6 * 30);
             if (spawnTorpedo(this, angle)) {
                 play(12);
             }
@@ -1554,7 +1670,8 @@ function gameloop() {
                 if (--torpedo.e < 0) {
                     // Torpedo destroyed
                     l.p += 5;
-                    if (Math.random() > 0.75) spawnBonus(torpedo);
+                    // Use seeded RNG for deterministic bonus drops
+                    if (gameRNG.random() > 0.75) spawnBonus(torpedo);
                     explode(torpedo.x, torpedo.y);
                     torpedos.pool.release(torpedoIdx);
                     play(11);
@@ -1746,7 +1863,12 @@ function gameloop() {
         l.p += (l.level || 0) * 1000;
         l.level = (l.level || 0) + 1;
         
+        // Generate deterministic seed for this level
+        l.levelSeed = SeededRNG.levelSeed(gameSeed, l.level);
+        gameRNG.setSeed(l.levelSeed);
+        
         // Spawn all enemy types with vertical offsets
+        // Enemy spawning now uses gameRNG for deterministic placement
         spawnEnemy(0, -0.75 * l.HEIGHT);
         spawnEnemy(1, -1.5 * l.HEIGHT);
         spawnEnemy(2, -1 * l.HEIGHT);
@@ -1963,6 +2085,10 @@ async function initGame() {
     // Create background pattern for efficient rendering
     l.backgroundPattern = a.createPattern(l.background, 'repeat');
     
+    // Initialize game seed (can be set externally for multiplayer/replays)
+    gameSeed = Date.now();
+    gameRNG.setSeed(gameSeed);
+    
     // Show title
     spawnText('SORADES 13K', 6 * 30);
     
@@ -1973,6 +2099,42 @@ async function initGame() {
     // Play intro sound
     play(21);
 }
+
+/**
+ * Sets the game seed for deterministic gameplay.
+ * Call before starting a new game for reproducible levels.
+ * 
+ * @param {number} seed - Seed value for the game session
+ */
+function setGameSeed(seed) {
+    gameSeed = seed >>> 0;
+    gameRNG.setSeed(gameSeed);
+    l.level = 0; // Reset level counter
+}
+
+/**
+ * Gets the current game seed.
+ * Useful for sharing seeds in multiplayer or saving replays.
+ * 
+ * @returns {number} Current game seed
+ */
+function getGameSeed() {
+    return gameSeed;
+}
+
+/**
+ * Gets the current level's seed.
+ * 
+ * @returns {number} Current level seed
+ */
+function getLevelSeed() {
+    return l.levelSeed;
+}
+
+// Export seed functions for external access
+window['setGameSeed'] = setGameSeed;
+window['getGameSeed'] = getGameSeed;
+window['getLevelSeed'] = getLevelSeed;
 
 // Start initialization after a brief delay to ensure DOM is ready
 // and to allow the "LOADING" text to render

@@ -13,6 +13,69 @@ possible on a wide variety of browsers and machines. Developed with Opera.
 Tested with Firefox, Chrome and even Internet Explorer 9 (no sound though).
 Fullscreen works in Opera 12.50+, Firefox and WebKit based browsers.
 
+## GopherJS Port
+
+This version has been refactored to use [GopherJS](https://github.com/nicois/gopherjs) (Go compiled to JavaScript).
+
+### Features
+
+- **Seeded PRNG**: Deterministic level generation using Mulberry32 algorithm
+- **Object Pooling**: Pre-allocated pools with swap-and-pop for efficient memory management
+- **Web Audio API**: Low-latency sound effects using AudioContext
+- **Canvas 2D Rendering**: Efficient sprite rendering with createPattern for background
+- **requestAnimationFrame**: Smooth 30 FPS game loop
+
+### Project Structure
+
+```
+.
+├── main.go              # Entry point
+├── game/
+│   ├── audio.go         # Web Audio API sound manager
+│   ├── enemies.go       # Enemy spawning and behavior
+│   ├── graphics.go      # Canvas rendering and sprite generation
+│   ├── input.go         # Keyboard input handling
+│   ├── loop.go          # Main game loop
+│   ├── pool.go          # Object pools (bullets, torpedos, etc.)
+│   ├── rng.go           # Seeded random number generator
+│   └── state.go         # Game state and core logic
+├── jsfxr.js             # Sound synthesis library
+├── index.html           # HTML entry point
+├── Makefile             # Build commands
+└── go.mod               # Go module definition
+```
+
+### Building
+
+#### Prerequisites
+
+- Go 1.21 or later
+- GopherJS: `go install github.com/nicois/gopherjs@latest`
+
+#### Build Commands
+
+```bash
+# Build the game
+make build
+
+# Build minified for production
+make build-min
+
+# Start local development server
+make serve
+
+# Clean build artifacts
+make clean
+```
+
+#### Manual Build
+
+```bash
+gopherjs build -o game.js .
+```
+
+## Original Credits
+
 SORADES 13K is a [Gramambo game](http://www.gramambo.de/index.php?option=com_content&view=article&id=4&Itemid=5#Spiele)
 by [Thiemo M&auml;ttig](http://maettig.com/)
 ([@maettig](https://twitter.com/maettig) at Twitter).
