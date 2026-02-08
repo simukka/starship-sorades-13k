@@ -60,6 +60,11 @@ type AudioManager struct {
 
 	// Level music preset
 	currentPreset *LevelMusicPreset
+
+	// Shield filter - low-pass filter for muffling external sounds when inside base
+	shieldFilter     *js.Object // BiquadFilterNode for low-pass filtering
+	shieldFilterGain *js.Object // Pre-filter gain for attenuation
+	insideShield     bool       // Track if ship is currently inside shield
 }
 
 // GetCurrentPresetName returns the name of the currently active music preset
@@ -103,6 +108,9 @@ func (am *AudioManager) Init() []string {
 
 	// Initialize reverb effect chain
 	am.initReverb()
+
+	// Initialize shield filter for muffling external sounds
+	am.initShieldFilter()
 
 	am.ready = true
 
@@ -161,7 +169,20 @@ func (am *AudioManager) Play(id int) {
 // pan: -1.0 = full left, 0.0 = center, 1.0 = full right
 // volume: 0.0 = silent, 1.0 = full volume (can exceed 1.0 for boost)
 // Also sends the signal to the reverb bus at lower volume.
+// Note: This routes through the shield filter for the muffling effect.
 func (am *AudioManager) PlayWithPan(id int, pan, volume float64) {
+	am.playWithPanInternal(id, pan, volume, true) // Route through shield filter
+}
+
+// PlayLocal plays a sound effect for the local player (not filtered by shield).
+// Used for player's own actions like firing, pickups, etc.
+func (am *AudioManager) PlayLocal(id int, volume float64) {
+	am.playWithPanInternal(id, 0, volume, false) // Direct to master, no filter
+}
+
+// playWithPanInternal is the internal implementation for playing sounds.
+// useShieldFilter: if true, routes through shield filter (for external sounds)
+func (am *AudioManager) playWithPanInternal(id int, pan, volume float64, useShieldFilter bool) {
 	if !am.ready {
 		return
 	}
@@ -205,8 +226,14 @@ func (am *AudioManager) PlayWithPan(id int, pan, volume float64) {
 	source.Call("connect", gainNode)
 	gainNode.Call("connect", panner)
 
-	// Dry path: panner -> masterGain
-	panner.Call("connect", am.masterGain)
+	// Route based on whether this is an external sound
+	if useShieldFilter && am.shieldFilterGain != nil {
+		// External sound: route through shield filter (muffled when inside shield)
+		panner.Call("connect", am.shieldFilterGain)
+	} else {
+		// Local/player sound: route directly to master (never muffled)
+		panner.Call("connect", am.masterGain)
+	}
 
 	// Wet path: panner -> reverb (if available)
 	if am.reverb != nil {
@@ -307,6 +334,58 @@ func (am *AudioManager) generateImpulseResponse(duration, decay float64) {
 	}
 
 	am.reverb.Set("buffer", impulse)
+}
+
+// initShieldFilter creates a low-pass filter for muffling external sounds when inside base shield.
+// This simulates the shield blocking/dampening high frequencies from outside.
+func (am *AudioManager) initShieldFilter() {
+	// Create a biquad filter node for low-pass filtering
+	am.shieldFilter = am.ctx.Call("createBiquadFilter")
+	am.shieldFilter.Set("type", "lowpass")
+	// Start with high cutoff (no filtering)
+	am.shieldFilter.Get("frequency").Set("value", 20000)
+	am.shieldFilter.Get("Q").Set("value", 0.7) // Gentle rolloff
+
+	// Create gain node for additional attenuation
+	am.shieldFilterGain = am.ctx.Call("createGain")
+	am.shieldFilterGain.Get("gain").Set("value", 1.0)
+
+	// Route: shieldFilterGain -> shieldFilter -> masterGain
+	am.shieldFilterGain.Call("connect", am.shieldFilter)
+	am.shieldFilter.Call("connect", am.masterGain)
+
+	am.insideShield = false
+}
+
+// SetShieldMode enables or disables the shield audio filter effect.
+// When inside=true, external sounds are muffled with a low-pass filter.
+// The transition is smooth to avoid audio pops.
+func (am *AudioManager) SetShieldMode(inside bool) {
+	if !am.ready || am.shieldFilter == nil {
+		return
+	}
+
+	// Don't retrigger if state hasn't changed
+	if am.insideShield == inside {
+		return
+	}
+	am.insideShield = inside
+
+	currentTime := am.ctx.Get("currentTime").Float()
+	transitionTime := 0.15 // Smooth 150ms transition
+
+	if inside {
+		// Inside shield - apply low-pass filter and slight volume reduction
+		// Cutoff at 800Hz muffles most high frequencies while letting bass through
+		am.shieldFilter.Get("frequency").Call("linearRampToValueAtTime", 800, currentTime+transitionTime)
+		am.shieldFilter.Get("Q").Call("linearRampToValueAtTime", 1.5, currentTime+transitionTime) // Slight resonance at cutoff
+		am.shieldFilterGain.Get("gain").Call("linearRampToValueAtTime", 0.6, currentTime+transitionTime)
+	} else {
+		// Outside shield - full frequency response
+		am.shieldFilter.Get("frequency").Call("linearRampToValueAtTime", 20000, currentTime+transitionTime)
+		am.shieldFilter.Get("Q").Call("linearRampToValueAtTime", 0.7, currentTime+transitionTime)
+		am.shieldFilterGain.Get("gain").Call("linearRampToValueAtTime", 1.0, currentTime+transitionTime)
+	}
 }
 
 // SetVolume sets the master volume (0.0 to 1.0).

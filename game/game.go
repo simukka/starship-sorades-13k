@@ -1,6 +1,8 @@
 package game
 
 import (
+	"math"
+
 	"github.com/gopherjs/gopherjs/js"
 	"github.com/simukka/starship-sorades-13k/audio"
 	"github.com/simukka/starship-sorades-13k/common"
@@ -13,6 +15,7 @@ type Game struct {
 	Ships    []*Ship
 	Ship     *Ship
 	Enemies  []*Enemy
+	Bases    []*Base
 	GameSeed uint32
 	GameRNG  *common.SeededRNG
 
@@ -44,46 +47,78 @@ type Game struct {
 	EnemyTypes     map[EnemyKind]EnemyType
 
 	// Debug UI
-	DebugUI      *DebugUI
+	// DebugUI      *DebugUI
 	StatsOverlay *StatsOverlay
+	ShipHUD      *ShipHUD
 
 	// Collision detection
 	EnemyGrid  *SpatialGrid // Spatial hash for enemies
 	BulletGrid *SpatialGrid // Spatial hash for bullets/torpedos
+
+	// Camera for infinite world
+	Camera *Camera
 }
 
 // NewGame creates a new game instance.
-func NewGame() *Game {
+func NewGame(canvas, ctx *js.Object) *Game {
 	seed := common.NewSeededRNG(0)
 	g := &Game{
-		Enemies:      make([]*Enemy, 0, 64),
-		GameRNG:      seed,
-		Bullets:      NewBulletPool(350),
-		Explosions:   NewExplosionPool(50),
-		Bonuses:      NewBonusPool(30),
-		Audio:        audio.NewAudioManager(seed, HEIGHT),
-		Keys:         make(map[int]bool),
-		BonusImages:  make(map[string]*js.Object),
-		EnemyTypes:   make(map[EnemyKind]EnemyType, 4),
-		DebugUI:      NewDebugUI(),
+		Enemies:     make([]*Enemy, 0, 64),
+		Bases:       make([]*Base, 0, 8),
+		GameRNG:     seed,
+		Bullets:     NewBulletPool(350),
+		Explosions:  NewExplosionPool(50),
+		Bonuses:     NewBonusPool(30),
+		Audio:       audio.NewAudioManager(seed, HEIGHT),
+		Keys:        make(map[int]bool),
+		BonusImages: make(map[string]*js.Object),
+		EnemyTypes:  make(map[EnemyKind]EnemyType, 4),
+		// DebugUI:      NewDebugUI(),
 		StatsOverlay: NewStatsOverlay(),
+		ShipHUD:      NewShipHUD(),
 		EnemyGrid:    NewSpatialGrid(WIDTH, HEIGHT, 64),
 		BulletGrid:   NewSpatialGrid(WIDTH, HEIGHT, 64),
+		Camera:       &Camera{X: 0, Y: 0},
+		Canvas:       canvas,
+		Ctx:          ctx,
 	}
+	// Initialize audio
+	sounds := g.Audio.Init()
+
+	// Load all sound effects using pure Go jsfxr implementation
+	for i, dataURL := range sounds {
+		g.Audio.LoadSound(i, dataURL)
+	}
+
+	// Initialize audio control panel (right-click to open)
+	g.Audio.InitControlPanel(g.Canvas)
+
 	g.initLevelDefaults()
 	g.initShipDefaults()
+
+	// Initialize graphics (background, sprites, etc.)
+	// Must be after initShipDefaults() so ship sprites can be rendered
+	g.InitializeGraphics()
+
+	g.SetupInputHandlers()
+	g.RenderTitleScreen()
+
+	g.initBases()
+	g.Start()
 	return g
 }
 
 // initShipDefaults initializes ship state to default values.
 func (g *Game) initShipDefaults() {
 	g.Ships = append(g.Ships, &Ship{
-		X:       WIDTH / 2,
-		Y:       HEIGHT * 7 / 8,
+		X:       0, // Start at world origin
+		Y:       0,
+		VelX:    0,
+		VelY:    0,
 		E:       100,
 		XAcc:    0,
 		YAcc:    0,
-		Angle:   0,
+		Angle:   0, // Facing "up" (negative Y in world space)
 		Weapon:  0,
 		Reload:  0,
 		Timeout: 0,
@@ -91,11 +126,18 @@ func (g *Game) initShipDefaults() {
 		Shield: Shield{
 			MaxT: ShipMaxShield,
 		},
-		local: true,
+		local:  true,
+		Paused: false,
 	})
 
 	g.Ship = g.Ships[0]
 	g.Ship.AddWeapon()
+}
+
+// initBases initializes the starting base(s).
+func (g *Game) initBases() {
+	// Create a base at the world origin (where the ship starts)
+	g.Bases = append(g.Bases, NewBase(0, 0))
 }
 
 // initLevelDefaults initializes level state to default values.
@@ -106,7 +148,7 @@ func (g *Game) initLevelDefaults() {
 		P:         0,
 		Y:         0,
 		Bomb:      0,
-		Paused:    true,
+		Paused:    false,
 		Text:      TextDisplay{MaxT: 90},
 		Points: Points{
 			Width:  32,
@@ -115,39 +157,6 @@ func (g *Game) initLevelDefaults() {
 			Images: make([]*js.Object, 10),
 		},
 	}
-}
-
-// Hurt applies damage to a player's ship.
-func (g *Game) Hurt(damage int, ship *Ship) {
-	if ship.Shield.T > 0 {
-		g.Audio.PlayWithPan(2, ship.AudioPan(), 1.0)
-		return
-	}
-
-	if ship.Timeout < 0 {
-		ship.E -= damage
-		if ship.E < 0 {
-			ship.E = 0
-		}
-		ship.Timeout = 10
-	}
-
-	if ship.E == 0 && !g.Level.Paused {
-		g.Explode(ship.X, ship.Y, 512)
-		g.Explode(ship.X, ship.Y, 1024)
-		g.Level.Paused = true
-		g.SpawnText("GAME OVER", -1)
-		g.Audio.PlayWithPan(14, ship.AudioPan(), 1.0)
-	} else if ship.E < 25 {
-		g.Audio.PlayWithPan(17, ship.AudioPan(), 1.0)
-	}
-
-	g.Audio.PlayWithPan(1, ship.AudioPan(), 1.0)
-
-	if ship.Weapon > 2 {
-		ship.Weapon--
-	}
-	ship.OSD = ShipMaxOSD
 }
 
 // Explode creates an explosion effect.
@@ -260,35 +269,26 @@ func (g *Game) GetLevelSeed() uint32 {
 
 // Start begins or resumes the game.
 func (g *Game) Start() {
-	Debug("Start!")
-	g.Level.Paused = false
-
 	// Cancel existing animation frame
 	if g.AnimationFrameID > 0 {
 		js.Global.Call("cancelAnimationFrame", g.AnimationFrameID)
 	}
 
-	// Fade out title and start synth music (seeded for deterministic music)
-	g.Audio.FadeOutTitle()
-	g.Audio.StartSynthMusic(g.GameSeed, g.Level.LevelNum+1) // Use level 1 preset at start
+	g.Audio.StartSynthMusic(g.GameSeed, 1) // Use level 1 preset at start
 
 	// Start game loop
 	g.AnimationFrameID = js.Global.Call("requestAnimationFrame", g.GameLoopRAF).Int()
+
+	if g.Audio.AudioCtx != nil && g.Audio.AudioCtx.Get("state").String() == "suspended" {
+		g.Audio.AudioCtx.Call("resume")
+	}
 }
 
 // GameOver handles game over state.
 func (g *Game) GameOver() {
-	g.Level.Paused = true
-
 	// Stop music
 	g.Audio.StopMusic()
 	g.Audio.StopSynthMusic()
-
-	// Play game over sound
-	g.Audio.Play(14)
-
-	// Display game over text
-	g.SpawnText("GAME OVER", 0)
 
 	// Render title screen after delay
 	js.Global.Call("setTimeout", func() {
@@ -305,14 +305,14 @@ func (g *Game) RenderTitleScreen() {
 	g.Ctx.Call("fillRect", 0, 0, WIDTH, HEIGHT)
 
 	// Draw title text
-	g.SpawnText("STARSHIP SORADES", 10)
+	// g.SpawnText("STARSHIP SORADES", 10)
 
 	// Draw instructions
 	g.Ctx.Set("fillStyle", Theme.TextSecondaryColor)
 	g.Ctx.Set("font", Theme.InstructFont)
 	g.Ctx.Set("textAlign", "center")
-	g.Ctx.Call("fillText", "C", WIDTH/2, HEIGHT/2+50)
-	g.Ctx.Call("fillText", "ARROWS TO MOVE, X TO FIRE, F FOR FULLSCREEN", WIDTH/2, HEIGHT/2+80)
+	// g.Ctx.Call("fillText", "C", WIDTH/2, HEIGHT/2+50)
+	g.Ctx.Call("fillText", "LEFT/RIGHT TO ROTATE, UP/DOWN TO THRUST, X TO FIRE", WIDTH/2, HEIGHT/2+80)
 
 	// Play title music
 	g.Audio.PlayTitle()
@@ -320,7 +320,13 @@ func (g *Game) RenderTitleScreen() {
 
 // ResetGame resets all game state for a new game.
 func (g *Game) ResetGame() {
+	// Reset ships
+	g.Ships = g.Ships[:0]
 	g.initShipDefaults()
+
+	// Reset camera to follow ship
+	g.Camera.X = g.Ship.X
+	g.Camera.Y = g.Ship.Y
 
 	// Reset level (preserve Background, Points assets)
 	g.initLevelDefaults()
@@ -333,6 +339,10 @@ func (g *Game) ResetGame() {
 	// Clear enemies
 	g.Enemies = g.Enemies[:0]
 
+	// Reset bases
+	g.Bases = g.Bases[:0]
+	g.initBases()
+
 	// Reset game RNG
 	g.GameRNG.SetSeed(g.GameSeed)
 }
@@ -344,4 +354,100 @@ func (g *Game) RemoveEnemy(index int) {
 		g.Enemies[index] = g.Enemies[last]
 	}
 	g.Enemies = g.Enemies[:last]
+}
+
+// GetAllEntities returns all entities (ships and enemies) as an Entity interface slice.
+// Useful for operations that need to iterate over all game entities uniformly.
+func (g *Game) GetAllEntities() []Entity {
+	entities := make([]Entity, 0, len(g.Ships)+len(g.Enemies))
+	for _, s := range g.Ships {
+		entities = append(entities, s)
+	}
+	for _, e := range g.Enemies {
+		entities = append(entities, e)
+	}
+	return entities
+}
+
+// ForEachEntity calls the given function for each entity in the game.
+// This provides a unified way to process all ships and enemies.
+func (g *Game) ForEachEntity(fn func(Entity)) {
+	for _, s := range g.Ships {
+		fn(s)
+	}
+	for _, e := range g.Enemies {
+		fn(e)
+	}
+}
+
+// FindNearestEntity finds the nearest entity to a given world position.
+// Returns nil if no entities exist.
+func (g *Game) FindNearestEntity(x, y float64) Entity {
+	var nearest Entity
+	nearestDistSq := float64(1<<31 - 1) // Max float
+
+	g.ForEachEntity(func(e Entity) {
+		ex, ey := e.GetPosition()
+		dx := x - ex
+		dy := y - ey
+		distSq := dx*dx + dy*dy
+		if distSq < nearestDistSq {
+			nearestDistSq = distSq
+			nearest = e
+		}
+	})
+
+	return nearest
+}
+
+// ProcessInput handles player input.
+func (g *Game) ProcessInput() {
+	// Fire weapon (X key)
+	if g.Keys[88] {
+		g.Ship.Fire(g)
+	}
+
+	g.Ship.Move(g, g.Keys)
+}
+
+// RenderBackground renders the scrolling background based on camera position.
+// Creates an infinite scrolling effect by tiling the background pattern.
+func (g *Game) RenderBackground() {
+	g.Ctx.Call("save")
+	bgWidth := g.Level.Background.Get("width").Float()
+
+	// Calculate offset based on camera position for parallax effect
+	offsetX := math.Mod(-g.Camera.X*0.5, bgWidth)
+	offsetY := math.Mod(-g.Camera.Y*0.5, bgWidth)
+
+	g.Ctx.Call("translate", offsetX, offsetY)
+	g.Ctx.Set("fillStyle", g.Level.BackgroundPattern)
+	g.Ctx.Call("fillRect", -bgWidth, -bgWidth, WIDTH+bgWidth*2, HEIGHT+bgWidth*2)
+	g.Ctx.Call("restore")
+}
+
+// RenderScore renders the score display.
+func (g *Game) RenderScore() {
+	points := g.Level.P
+	scoreX := WIDTH - g.Level.Points.Width - 8
+	for points > 0 {
+		g.Ctx.Call("drawImage", g.Level.Points.Images[points%10], scoreX, 4)
+		points /= 10
+		scoreX -= g.Level.Points.Step
+	}
+}
+
+// RenderText renders the text display.
+func (g *Game) RenderText() {
+	if g.Level.Text.T > 0 {
+		if g.Level.Text.T < g.Level.Text.MaxT {
+			g.Ctx.Set("globalAlpha", float64(g.Level.Text.T)/float64(g.Level.Text.MaxT))
+		} else {
+			g.Ctx.Set("globalAlpha", 1)
+		}
+		g.Ctx.Call("drawImage", g.Level.Text.Image, g.Level.Text.X, g.Level.Text.Y)
+		g.Ctx.Set("globalAlpha", 1)
+		g.Level.Text.T--
+		g.Level.Text.Y += int(g.Level.Text.YAcc)
+	}
 }

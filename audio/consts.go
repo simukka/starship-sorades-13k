@@ -319,6 +319,10 @@ var SfxData = []string{
 	"0,,.3138,,.0117,.7877,.1583,-.3391,-.04,,.0464,.0585,,.4085,-.4195,,-.024,-.0396,1,-.0437,.0124,.02,.0216,.3",
 	// 21 = Intro sound
 	"0,1,.8799,.3499,.17,.61,.1899,-.3,-.18,.3,.6399,-.0279,.0071,.8,-.1599,.5099,-.46,.5199,.25,.0218,.49,.4,-.2,.3",
+	// 22 = Target locking (rising electronic tone)
+	"1,.0099,.15,,.2299,.45,,.1799,.48,.5099,.4599,-.4399,.6299,,,,,.0099,.6599,.0099,,.1699,,.4",
+	// 23 = Ship thrust (magnetic hum sound)
+	"2,.01,.12,.03,.15,.18,,,.02,,.08,.12,.45,,,,,.08,.6,.15,.4,.03,,.3",
 }
 
 // SoundEffectLibrary contains all structured sound effects
@@ -345,4 +349,6 @@ var SoundEffectLibrary []*SoundEffect = []*SoundEffect{
 	ParseJsfxrString(19, "Small Shoot", "Enemy", "Small enemy fires", SfxData[19]),
 	ParseJsfxrString(20, "Medium Shoot", "Enemy", "Medium enemy fires", SfxData[20]),
 	ParseJsfxrString(21, "Intro", "UI", "Title screen intro", SfxData[21]),
+	ParseJsfxrString(22, "Target Lock", "Player", "Target locking sound", SfxData[22]),
+	ParseJsfxrString(23, "Thrust", "Player", "Ship engine thrust", SfxData[23]),
 }

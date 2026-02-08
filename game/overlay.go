@@ -7,6 +7,195 @@ import (
 	"github.com/gopherjs/gopherjs/js"
 )
 
+// ShipHUD displays ship velocity, angle, and position
+type ShipHUD struct {
+	Visible    bool
+	PanelX     int
+	PanelY     int
+	LineHeight int
+}
+
+// NewShipHUD creates a new ship HUD instance
+func NewShipHUD() *ShipHUD {
+	return &ShipHUD{
+		Visible:    true,
+		PanelX:     10,
+		PanelY:     10,
+		LineHeight: 16,
+	}
+}
+
+// Toggle toggles the ship HUD visibility
+func (h *ShipHUD) Toggle() {
+	h.Visible = !h.Visible
+}
+
+// Render draws the ship HUD overlay
+func (h *ShipHUD) Render(ctx *js.Object, ship *Ship) {
+	if !h.Visible || ship == nil {
+		return
+	}
+
+	y := h.PanelY + 16
+
+	// Calculate total velocity
+	velocity := math.Sqrt(ship.VelX*ship.VelX + ship.VelY*ship.VelY)
+
+	// Convert angle to degrees (0-360)
+	angleDeg := math.Mod(ship.Angle*180/math.Pi+360, 360)
+
+	// Set text style
+	ctx.Set("font", "bold 12px monospace")
+	ctx.Set("textAlign", "left")
+	ctx.Set("shadowBlur", 4)
+	ctx.Set("shadowColor", "#000000")
+
+	// Position
+	ctx.Set("fillStyle", "#00ffff")
+	ctx.Call("fillText", "POS: "+strconv.FormatFloat(ship.X, 'f', 1, 64)+", "+strconv.FormatFloat(ship.Y, 'f', 1, 64), h.PanelX, y)
+	y += h.LineHeight
+
+	// Velocity
+	ctx.Set("fillStyle", "#ffff00")
+	ctx.Call("fillText", "VEL: "+strconv.FormatFloat(velocity, 'f', 2, 64)+" ("+strconv.FormatFloat(ship.VelX, 'f', 1, 64)+", "+strconv.FormatFloat(ship.VelY, 'f', 1, 64)+")", h.PanelX, y)
+	y += h.LineHeight
+
+	// Angle
+	ctx.Set("fillStyle", "#ff88ff")
+	ctx.Call("fillText", "ANG: "+strconv.FormatFloat(angleDeg, 'f', 1, 64)+"°", h.PanelX, y)
+	y += h.LineHeight
+
+	// Targeting status
+	if ship.Target != nil {
+		ctx.Set("fillStyle", "#ff0000")
+		ctx.Call("fillText", "TGT: LOCKED", h.PanelX, y)
+	} else if ship.LockingOn != nil {
+		// Show lock progress
+		progress := 100 - (ship.LockTimer * 100 / ship.LockMaxTime)
+		ctx.Set("fillStyle", "#ff8800")
+		ctx.Call("fillText", "TGT: LOCKING "+strconv.Itoa(progress)+"%", h.PanelX, y)
+	} else {
+		ctx.Set("fillStyle", "#888888")
+		ctx.Call("fillText", "TGT: NONE [T]", h.PanelX, y)
+	}
+
+	// Reset shadow
+	ctx.Set("shadowBlur", 0)
+
+	// Render weapon indicator UI
+	h.RenderWeaponIndicator(ctx, ship)
+}
+
+// RenderWeaponIndicator draws a circular UI showing weapon placements and aim angles
+func (h *ShipHUD) RenderWeaponIndicator(ctx *js.Object, ship *Ship) {
+	if len(ship.Weapons) == 0 {
+		return
+	}
+
+	// Position the weapon indicator in bottom-left corner
+	centerX := float64(h.PanelX + 60)
+	centerY := float64(HEIGHT - 80)
+	radius := 50.0
+	weaponDotRadius := 6.0
+
+	ctx.Call("save")
+
+	// Draw outer ring (ship representation)
+	ctx.Set("strokeStyle", "#444444")
+	ctx.Set("lineWidth", 2)
+	ctx.Call("beginPath")
+	ctx.Call("arc", centerX, centerY, radius, 0, math.Pi*2)
+	ctx.Call("stroke")
+
+	// Draw ship direction indicator (forward arrow)
+	ctx.Set("strokeStyle", "#666666")
+	ctx.Set("lineWidth", 1)
+	ctx.Call("beginPath")
+	ctx.Call("moveTo", centerX, centerY-radius-5)
+	ctx.Call("lineTo", centerX-5, centerY-radius+5)
+	ctx.Call("moveTo", centerX, centerY-radius-5)
+	ctx.Call("lineTo", centerX+5, centerY-radius+5)
+	ctx.Call("stroke")
+
+	// Calculate angle to target if we have one
+	var targetAngle float64
+	hasTarget := ship.Target != nil && ship.Target.IsAlive()
+	if hasTarget {
+		dx := ship.Target.X - ship.X
+		dy := (ship.Target.Y + ship.Target.YOffset) - ship.Y
+		targetAngle = math.Atan2(dx, -dy) - ship.Angle // Relative to ship facing
+	}
+
+	// Draw each weapon
+	for _, w := range ship.Weapons {
+		// Calculate weapon's base angle from its X,Y direction
+		weaponAngle := math.Atan2(w.X, -w.Y)
+
+		// Position on the ring
+		wx := centerX + math.Sin(weaponAngle)*radius*0.8
+		wy := centerY - math.Cos(weaponAngle)*radius*0.8
+
+		// Draw weapon dot
+		if hasTarget {
+			ctx.Set("fillStyle", "#FF5B24") // Vipps orange when targeting
+		} else {
+			ctx.Set("fillStyle", "#888888") // Gray when no target
+		}
+		ctx.Call("beginPath")
+		ctx.Call("arc", wx, wy, weaponDotRadius, 0, math.Pi*2)
+		ctx.Call("fill")
+
+		// Draw aim line toward target
+		if hasTarget {
+			// Line from weapon to edge of indicator showing aim direction
+			aimLength := radius * 0.6
+			aimX := wx + math.Sin(targetAngle)*aimLength
+			aimY := wy - math.Cos(targetAngle)*aimLength
+
+			ctx.Set("strokeStyle", "#FF5B24")
+			ctx.Set("lineWidth", 1.5)
+			ctx.Set("globalAlpha", 0.7)
+			ctx.Call("beginPath")
+			ctx.Call("moveTo", wx, wy)
+			ctx.Call("lineTo", aimX, aimY)
+			ctx.Call("stroke")
+			ctx.Set("globalAlpha", 1)
+		}
+	}
+
+	// Draw target indicator on the ring edge if targeting
+	if hasTarget {
+		targetX := centerX + math.Sin(targetAngle)*radius
+		targetY := centerY - math.Cos(targetAngle)*radius
+
+		ctx.Set("fillStyle", "#ff0000")
+		ctx.Set("shadowBlur", 6)
+		ctx.Set("shadowColor", "#ff0000")
+		ctx.Call("beginPath")
+		ctx.Call("arc", targetX, targetY, 5, 0, math.Pi*2)
+		ctx.Call("fill")
+		ctx.Set("shadowBlur", 0)
+
+		// Draw crosshair at target position
+		ctx.Set("strokeStyle", "#ff0000")
+		ctx.Set("lineWidth", 1)
+		ctx.Call("beginPath")
+		ctx.Call("moveTo", targetX-8, targetY)
+		ctx.Call("lineTo", targetX+8, targetY)
+		ctx.Call("moveTo", targetX, targetY-8)
+		ctx.Call("lineTo", targetX, targetY+8)
+		ctx.Call("stroke")
+	}
+
+	// Draw center dot (ship position)
+	ctx.Set("fillStyle", "#FF5B24")
+	ctx.Call("beginPath")
+	ctx.Call("arc", centerX, centerY, 4, 0, math.Pi*2)
+	ctx.Call("fill")
+
+	ctx.Call("restore")
+}
+
 // StatsOverlay displays real-time game statistics
 type StatsOverlay struct {
 	Visible bool
@@ -62,12 +251,6 @@ func (s *StatsOverlay) Render(ctx *js.Object, g *Game) {
 		return
 	}
 
-	// Render enemy debug overlays first (in world space)
-	s.RenderEnemyDebug(ctx, g)
-
-	// Render player hitbox
-	s.RenderPlayerDebug(ctx, g)
-
 	// Draw stats panel background
 	ctx.Set("fillStyle", "rgba(0, 0, 0, 0.75)")
 	ctx.Call("fillRect", s.PanelX, s.PanelY, s.PanelWidth, s.PanelHeight)
@@ -104,14 +287,7 @@ func (s *StatsOverlay) Render(ctx *js.Object, g *Game) {
 	ctx.Call("fillText", "── Game State ──", s.PanelX+10, y)
 	y += s.LineHeight
 
-	// Game state
-	s.drawStatLine(ctx, "Level", strconv.Itoa(g.Level.LevelNum+1), "#ffffff", y)
-	y += s.LineHeight
-	s.drawStatLine(ctx, "Score", strconv.Itoa(g.Level.P), "#ffff00", y)
-	y += s.LineHeight
 	s.drawStatLine(ctx, "Game Seed", strconv.FormatUint(uint64(g.GameSeed), 10), "#aaaaaa", y)
-	y += s.LineHeight
-	s.drawStatLine(ctx, "Level Seed", strconv.FormatUint(uint64(g.Level.LevelSeed), 10), "#aaaaaa", y)
 	y += s.LineHeight
 
 	// Separator - Objects
@@ -150,114 +326,6 @@ func (s *StatsOverlay) Render(ctx *js.Object, g *Game) {
 	s.drawStatLine(ctx, "Shield", strconv.Itoa(g.Ship.Shield.T), "#00ffff", y)
 	y += s.LineHeight
 	s.drawStatLine(ctx, "Position", strconv.FormatFloat(g.Ship.X, 'f', 0, 64)+", "+strconv.FormatFloat(g.Ship.Y, 'f', 0, 64), "#aaaaaa", y)
-}
-
-// RenderEnemyDebug draws debug information for all enemies
-func (s *StatsOverlay) RenderEnemyDebug(ctx *js.Object, g *Game) {
-	for _, enemy := range g.Enemies {
-		enemyY := enemy.Y + enemy.YOffset
-		hitboxD := enemy.Radius * 0.6
-
-		// Draw hitbox (square bounding box)
-		ctx.Set("strokeStyle", "#ff0066")
-		ctx.Set("lineWidth", 2)
-		ctx.Call("strokeRect",
-			enemy.X-hitboxD, enemyY-hitboxD,
-			hitboxD*2, hitboxD*2)
-
-		// Draw radius circle (full enemy radius for reference)
-		ctx.Set("strokeStyle", "rgba(255, 0, 102, 0.3)")
-		ctx.Set("lineWidth", 1)
-		ctx.Call("beginPath")
-		ctx.Call("arc", enemy.X, enemyY, enemy.Radius, 0, math.Pi*2)
-		ctx.Call("stroke")
-
-		// Draw angle indicator line
-		ctx.Set("strokeStyle", "#ffff00")
-		ctx.Set("lineWidth", 2)
-		lineLength := enemy.Radius * 1.5
-		endX := enemy.X + math.Sin(enemy.TargetAngle())*lineLength
-		endY := enemyY + math.Cos(enemy.TargetAngle())*lineLength
-		ctx.Call("beginPath")
-		ctx.Call("moveTo", enemy.X, enemyY)
-		ctx.Call("lineTo", endX, endY)
-		ctx.Call("stroke")
-
-		// Draw health bar above enemy
-		barWidth := 40.0
-		barHeight := 4.0
-		barX := enemy.X - barWidth/2
-		barY := enemyY - enemy.Radius - 20
-
-		// Background
-		ctx.Set("fillStyle", "rgba(0, 0, 0, 0.7)")
-		ctx.Call("fillRect", barX-1, barY-1, barWidth+2, barHeight+2)
-
-		// Health fill (estimate max health for bar - use config)
-		config := enemyConfigs[enemy.Kind]
-		maxHealth := config.HealthBase + config.HealthPerLevel*g.Level.LevelNum
-		if maxHealth <= 0 {
-			maxHealth = 1
-		}
-		healthPercent := float64(enemy.Health) / float64(maxHealth)
-		if healthPercent > 1 {
-			healthPercent = 1
-		}
-
-		ctx.Set("fillStyle", s.healthColor(int(healthPercent*100)))
-		ctx.Call("fillRect", barX, barY, barWidth*healthPercent, barHeight)
-
-		// Border
-		ctx.Set("strokeStyle", "#ffffff")
-		ctx.Set("lineWidth", 1)
-		ctx.Call("strokeRect", barX, barY, barWidth, barHeight)
-
-		// Draw text info
-		ctx.Set("fillStyle", "#ffffff")
-		ctx.Set("font", "10px monospace")
-		ctx.Set("textAlign", "center")
-
-		// Health value
-		ctx.Call("fillText", "HP:"+strconv.Itoa(enemy.Health), enemy.X, barY-3)
-
-		// Position and angle below enemy
-		ctx.Set("fillStyle", "#aaaaaa")
-		ctx.Set("font", "9px monospace")
-		posText := "(" + strconv.FormatFloat(enemy.X, 'f', 0, 64) + "," + strconv.FormatFloat(enemyY, 'f', 0, 64) + ")"
-		ctx.Call("fillText", posText, enemy.X, enemyY+enemy.Radius+12)
-
-		// Angle in degrees
-		angleDeg := enemy.Angle * 180 / math.Pi
-		angleText := "∠" + strconv.FormatFloat(angleDeg, 'f', 1, 64) + "°"
-		ctx.Call("fillText", angleText, enemy.X, enemyY+enemy.Radius+22)
-
-		// Enemy kind/type
-		ctx.Set("fillStyle", "#ff0066")
-		kindName := EnemyKindNames[enemy.Kind]
-		ctx.Call("fillText", kindName, enemy.X, enemyY+enemy.Radius+32)
-	}
-
-	// Reset text alignment
-	ctx.Set("textAlign", "left")
-}
-
-// RenderPlayerDebug draws debug information for the player ship
-func (s *StatsOverlay) RenderPlayerDebug(ctx *js.Object, g *Game) {
-	ship := g.Ship
-
-	// Draw player hitbox (AABB)
-	ctx.Set("strokeStyle", "#00ff00")
-	ctx.Set("lineWidth", 2)
-	ctx.Call("strokeRect",
-		ship.X-ShipCollisionE, ship.Y-ShipCollisionD,
-		ShipCollisionE*2, ShipCollisionD*2)
-
-	// Draw ship radius circle for reference
-	ctx.Set("strokeStyle", "rgba(0, 255, 0, 0.3)")
-	ctx.Set("lineWidth", 1)
-	ctx.Call("beginPath")
-	ctx.Call("arc", ship.X, ship.Y, ShipR, 0, math.Pi*2)
-	ctx.Call("stroke")
 }
 
 // drawStatLine draws a single stat line with label and value

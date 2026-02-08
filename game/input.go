@@ -40,19 +40,11 @@ func (g *Game) SetupInputHandlers() {
 	// Keydown handler
 	js.Global.Get("document").Call("addEventListener", "keydown",
 		func(event *js.Object) {
-			rawKeyCode := event.Get("keyCode").Int()
-			keyCode := TranslateKeyCode(rawKeyCode)
+			keyCode := TranslateKeyCode(event.Get("keyCode").Int())
 			g.Keys[keyCode] = true
 
-			// Debug UI toggle (F9 = 120)
-			if rawKeyCode == 120 {
-				g.DebugUI.Toggle()
-				event.Call("preventDefault")
-				return
-			}
-
 			// Stats overlay toggle (F10 = 121)
-			if rawKeyCode == 121 {
+			if keyCode == 121 {
 				g.StatsOverlay.Toggle()
 				event.Call("preventDefault")
 				return
@@ -60,27 +52,7 @@ func (g *Game) SetupInputHandlers() {
 
 			// Pause toggle (P = 80, also mapped from Esc = 27)
 			if keyCode == 80 {
-				g.Level.Paused = !g.Level.Paused
-				event.Call("preventDefault")
-				return
-			}
-
-			// Debug UI controls when visible
-			if g.DebugUI.Visible {
-				switch rawKeyCode {
-				case 81: // Q - Previous enemy type
-					g.DebugUI.PrevEnemy()
-				case 69: // E - Next enemy type
-					g.DebugUI.NextEnemy()
-				case 87: // W - Previous field
-					g.DebugUI.PrevField()
-				case 83: // S - Next field
-					g.DebugUI.NextField()
-				case 65: // A - Decrease value
-					g.DebugUI.AdjustValue(-1)
-				case 68: // D - Increase value
-					g.DebugUI.AdjustValue(1)
-				}
+				g.Ship.Paused = !g.Ship.Paused
 				event.Call("preventDefault")
 				return
 			}
@@ -88,6 +60,13 @@ func (g *Game) SetupInputHandlers() {
 			// Prevent default for game keys
 			if keyCode >= 37 && keyCode <= 40 || keyCode == 88 {
 				event.Call("preventDefault")
+			}
+
+			// Target lock on 'T' key (84)
+			if keyCode == 84 {
+				g.Ship.InitiateTargetLock(g)
+				event.Call("preventDefault")
+				return
 			}
 
 			// Fullscreen toggle on 'F' key (70)
@@ -106,22 +85,7 @@ func (g *Game) SetupInputHandlers() {
 	// Keyup handler
 	js.Global.Get("document").Call("addEventListener", "keyup",
 		func(event *js.Object) {
-			rawKeyCode := event.Get("keyCode").Int()
-			keyCode := TranslateKeyCode(rawKeyCode)
+			keyCode := TranslateKeyCode(event.Get("keyCode").Int())
 			g.Keys[keyCode] = false
-		})
-
-	// Click handler for starting/pausing
-	js.Global.Get("document").Call("addEventListener", "click",
-		func(event *js.Object) {
-			if g.Audio.AudioCtx != nil && g.Audio.AudioCtx.Get("state").String() == "suspended" {
-				g.Audio.AudioCtx.Call("resume")
-			}
-
-			if g.Level.Paused {
-				g.Start()
-			} else {
-				// TODO: pause the game
-			}
 		})
 }

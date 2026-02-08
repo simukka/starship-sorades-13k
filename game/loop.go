@@ -1,11 +1,9 @@
 package game
 
 import (
-	"math"
 	"strconv"
 
 	"github.com/gopherjs/gopherjs/js"
-	"github.com/simukka/starship-sorades-13k/common"
 )
 
 // GameLoopRAF is the main game loop using requestAnimationFrame.
@@ -21,23 +19,21 @@ func (g *Game) GameLoopRAF(currentTime float64) {
 		return
 	}
 
-	Debug("Frame time:", currentTime, "Delta:", currentTime-g.LastFrameTime)
 	g.LastFrameTime = currentTime
-
-	if g.Level.Paused {
-		return
-	}
 
 	g.GameLoop()
 }
 
 // GameLoop is the core game logic.
 func (g *Game) GameLoop() {
-	Debug("Level:", g.Level.LevelNum, "Score:", g.Level.P, "Enemies:", len(g.Enemies))
-	Debug("Bullets:", g.Bullets.ActiveCount, "Explosions:", g.Explosions.ActiveCount)
-
 	// Player Input Processing
 	g.ProcessInput()
+
+	// Update targeting system
+	g.Ship.UpdateTargeting(g)
+
+	// Update shield audio filter based on ship position
+	g.UpdateShieldAudioFilter()
 
 	// Background Rendering
 	g.RenderBackground()
@@ -65,6 +61,9 @@ func (g *Game) GameLoop() {
 	// Enable additive blending
 	g.Ctx.Set("globalCompositeOperation", "lighter")
 
+	// Base Rendering (render before other entities)
+	g.RenderBases()
+
 	// Bonus Item Update
 	g.UpdateBonuses()
 
@@ -83,69 +82,14 @@ func (g *Game) GameLoop() {
 	// Disable additive blending
 	g.Ctx.Set("globalCompositeOperation", "source-over")
 
-	// Debug UI (rendered last, on top of everything)
-	g.DebugUI.Render(g.Ctx)
+	// Off-screen base indicators (render after blending disabled for visibility)
+	g.RenderBaseIndicators()
+
+	// Ship HUD overlay (velocity, angle, position)
+	g.ShipHUD.Render(g.Ctx, g.Ship)
 
 	// Stats overlay
 	g.StatsOverlay.Render(g.Ctx, g)
-}
-
-// ProcessInput handles player input.
-func (g *Game) ProcessInput() {
-	// Fire weapon (X key)
-	if g.Keys[88] {
-		g.Ship.Fire(g)
-	}
-
-	// Ship movement disabled when debug UI is visible (F9)
-	// This allows fine-tuning enemy configs without being hit
-	if g.DebugUI.Visible {
-		return
-	}
-
-	g.Ship.Move(g, g.Keys)
-}
-
-// ProcessDebugInput handles input for the debug UI
-func (g *Game) ProcessDebugInput() {
-	// Input is handled in keydown events in input.go
-}
-
-// RenderBackground renders the scrolling background.
-func (g *Game) RenderBackground() {
-	g.Ctx.Call("save")
-	bgWidth := g.Level.Background.Get("width").Float()
-	g.Ctx.Call("translate", 0, math.Mod(g.Level.Y, bgWidth))
-	g.Ctx.Set("fillStyle", g.Level.BackgroundPattern)
-	g.Ctx.Call("fillRect", 0, -bgWidth, WIDTH, HEIGHT+bgWidth)
-	g.Ctx.Call("restore")
-	g.Level.Y += Speed
-}
-
-// RenderScore renders the score display.
-func (g *Game) RenderScore() {
-	points := g.Level.P
-	scoreX := WIDTH - g.Level.Points.Width - 8
-	for points > 0 {
-		g.Ctx.Call("drawImage", g.Level.Points.Images[points%10], scoreX, 4)
-		points /= 10
-		scoreX -= g.Level.Points.Step
-	}
-}
-
-// RenderText renders the text display.
-func (g *Game) RenderText() {
-	if g.Level.Text.T > 0 {
-		if g.Level.Text.T < g.Level.Text.MaxT {
-			g.Ctx.Set("globalAlpha", float64(g.Level.Text.T)/float64(g.Level.Text.MaxT))
-		} else {
-			g.Ctx.Set("globalAlpha", 1)
-		}
-		g.Ctx.Call("drawImage", g.Level.Text.Image, g.Level.Text.X, g.Level.Text.Y)
-		g.Ctx.Set("globalAlpha", 1)
-		g.Level.Text.T--
-		g.Level.Text.Y += int(g.Level.Text.YAcc)
-	}
 }
 
 // UpdateBullets updates and renders bullets.
@@ -170,26 +114,33 @@ func (g *Game) UpdateBullets() {
 
 // PopulateSpatialGrids clears and repopulates the spatial hash grids.
 // Called once per frame before collision detection.
+// Uses camera-relative (screen) coordinates for infinite world support.
 func (g *Game) PopulateSpatialGrids() {
 	// Clear grids from previous frame
 	g.EnemyGrid.Clear()
 	g.BulletGrid.Clear()
 
-	// Insert all enemies
+	// Insert all enemies using screen coordinates
 	for _, enemy := range g.Enemies {
-		g.EnemyGrid.Insert(enemy)
+		screenX, screenY := g.Camera.WorldToScreen(enemy.X, enemy.Y+enemy.YOffset)
+		g.EnemyGrid.InsertAt(enemy, screenX, screenY)
 	}
 
-	// Insert all active bullets/torpedos
+	// Insert all active bullets/torpedos using screen coordinates
 	for i := 0; i < g.Bullets.ActiveCount; i++ {
-		g.BulletGrid.Insert(g.Bullets.Pool[i])
+		bullet := g.Bullets.Pool[i]
+		screenX, screenY := g.Camera.WorldToScreen(bullet.X, bullet.Y)
+		g.BulletGrid.InsertAt(bullet, screenX, screenY)
 	}
 }
 
 // CheckBulletTorpedoCollision checks if a standard bullet hits any nearby torpedos.
 func (g *Game) CheckBulletTorpedoCollision(bullet *Bullet) {
-	// Get nearby objects from the spatial grid
-	nearby := g.BulletGrid.GetNearby(bullet.X, bullet.Y)
+	// Convert bullet to screen coordinates for spatial grid lookup
+	screenX, screenY := g.Camera.WorldToScreen(bullet.X, bullet.Y)
+
+	// Get nearby objects from the spatial grid (using screen coordinates)
+	nearby := g.BulletGrid.GetNearby(screenX, screenY)
 
 	for _, obj := range nearby {
 		torpedo, ok := obj.(*Bullet)
@@ -197,20 +148,15 @@ func (g *Game) CheckBulletTorpedoCollision(bullet *Bullet) {
 			continue
 		}
 
-		// AABB collision check
+		// AABB collision check (using world coordinates for accuracy)
 		if bullet.Y < torpedo.Y+BulletTorpedoCollisionDist &&
 			bullet.Y > torpedo.Y-BulletTorpedoCollisionDist &&
 			bullet.X < torpedo.X+BulletTorpedoCollisionDist &&
 			bullet.X > torpedo.X-BulletTorpedoCollisionDist {
 
 			torpedo.E--
-			g.Level.P += 5
 
 			if torpedo.E < 0 {
-				// Torpedo destroyed
-				if g.GameRNG.Random() > 0.75 {
-					g.SpawnBonus(torpedo.X, torpedo.Y, 0, 0, "")
-				}
 				g.Explode(torpedo.X, torpedo.Y, 0)
 				vol := torpedo.DistanceVolume(g.Ship.X, g.Ship.Y, float64(HEIGHT))
 				g.Audio.PlayWithPan(11, torpedo.AudioPan(), vol)
@@ -240,68 +186,42 @@ func (g *Game) UpdateBonuses() {
 			return
 		}
 
-		// Render bonus
-		g.Ctx.Call("drawImage", g.BonusImages[item.Type],
-			int(item.X)-BonusR, int(item.Y)-BonusR)
-
 		// Update position
 		item.X += item.XAcc
 		item.Y += item.YAcc
 
-		// Remove off-screen items
-		if item.Y >= HEIGHT+BonusR*2 || item.X < -BonusR ||
-			item.X >= WIDTH+BonusR || item.Y < -BonusR {
+		// Convert to screen coordinates and render if visible
+		screenX, screenY := g.Camera.WorldToScreen(item.X, item.Y)
+		if g.Camera.IsOnScreen(item.X, item.Y, BonusR*2) {
+			g.Ctx.Call("drawImage", g.BonusImages[item.Type],
+				int(screenX)-BonusR, int(screenY)-BonusR)
+		}
+
+		// Remove items too far from camera (infinite world cleanup)
+		dx := item.X - g.Camera.X
+		dy := item.Y - g.Camera.Y
+		if dx*dx+dy*dy > EnemyDespawnDistance*EnemyDespawnDistance {
 			g.Bonuses.Release(idx)
 		}
 	})
 }
 
-// UpdateTorpedos updates and renders torpedoes.
-// func (g *Game) UpdateTorpedos() {
-// 	g.Torpedos.ForEachReverse(func(torpedo *Torpedo, idx int) {
-// 		// Check collision with player
-// 		collision := false
-// 		for _, s := range g.Ships {
-// 			if s.Collision(g, torpedo) && !collision {
-// 				collision = true
-// 				break
-// 			}
-// 		}
-
-// 		if collision {
-// 			g.Torpedos.Release(idx)
-// 			return
-// 		}
-
-// 		// Render torpedo with animation
-// 		g.Ctx.Call("drawImage", g.TorpedoImages[g.TorpedoFrame],
-// 			int(torpedo.X)-TorpedoR, int(torpedo.Y)-TorpedoR)
-
-// 		// Update position
-// 		torpedo.X += torpedo.XAcc
-// 		torpedo.Y += torpedo.YAcc
-
-// 		// Remove off-screen torpedoes
-// 		if torpedo.Y >= HEIGHT+TorpedoR || torpedo.X < -TorpedoR ||
-// 			torpedo.X >= WIDTH+TorpedoR || torpedo.Y < -HEIGHT {
-// 			g.Torpedos.Release(idx)
-// 		}
-// 	})
-
-// 	// Advance torpedo animation
-// 	g.TorpedoFrame = (g.TorpedoFrame + 1) % len(g.TorpedoImages)
-// }
-
 // UpdateExplosions updates and renders explosions.
 func (g *Game) UpdateExplosions() {
 	g.Explosions.ForEachReverse(func(exp *Explosion, idx int) {
-		g.Ctx.Call("save")
-		g.Ctx.Set("globalAlpha", exp.Alpha)
-		g.Ctx.Call("translate", exp.X, exp.Y)
-		g.Ctx.Call("rotate", exp.Angle)
-		g.Ctx.Call("drawImage", g.ExplosionImage,
-			-exp.Size/2, -exp.Size/2, exp.Size, exp.Size)
-		g.Ctx.Call("restore")
+		// Convert to screen coordinates
+		screenX, screenY := g.Camera.WorldToScreen(exp.X, exp.Y)
+
+		// Only render if on screen
+		if g.Camera.IsOnScreen(exp.X, exp.Y, exp.Size) {
+			g.Ctx.Call("save")
+			g.Ctx.Set("globalAlpha", exp.Alpha)
+			g.Ctx.Call("translate", screenX, screenY)
+			g.Ctx.Call("rotate", exp.Angle)
+			g.Ctx.Call("drawImage", g.ExplosionImage,
+				-exp.Size/2, -exp.Size/2, exp.Size, exp.Size)
+			g.Ctx.Call("restore")
+		}
 
 		// Animate explosion
 		exp.Size += 16
@@ -314,145 +234,64 @@ func (g *Game) UpdateExplosions() {
 	})
 }
 
-// RenderShip renders the player ship.
+// RenderShip renders the player ship using the Entity interface.
 func (g *Game) RenderShip() {
 	for _, s := range g.Ships {
-		s.Render(g)
+		s.Update(g)
 	}
 }
 
-// CheckWaveSpawn checks if a new wave should spawn.
+// CheckWaveSpawn spawns enemies continuously near each ship.
+// Enemy count and strength scale with each ship's points.
 func (g *Game) CheckWaveSpawn() {
-	if len(g.Enemies) == 0 && g.Level.Text.T == 0 {
-		g.Level.P += g.Level.LevelNum * 1000
-		g.Level.LevelNum++
+	// Calculate how many enemies should exist based on all ships' points
+	targetEnemies := 0
+	for _, ship := range g.Ships {
+		// Base enemies + scaling with points
+		targetEnemies += 5 + ship.Points/500
+	}
 
-		// Generate deterministic seed for this level
-		g.Level.LevelSeed = common.LevelSeed(g.GameSeed, g.Level.LevelNum)
-		g.GameRNG.SetSeed(g.Level.LevelSeed)
+	// Spawn new enemies when count drops below target
+	if len(g.Enemies) < targetEnemies {
+		// Spawn enemies near each ship
+		for _, ship := range g.Ships {
+			// Small fighters - always spawn
+			g.SpawnEnemyNearShip(SmallFighter, ship)
 
-		// Transition music to new level's key/preset
-		g.Audio.SetMusicPreset(g.Level.LevelNum)
+			// Medium fighters - spawn after 1000 points
+			if ship.Points > 1000 {
+				g.SpawnEnemyNearShip(MediumFighter, ship)
+			}
 
-		// Spawn all enemy types
-		g.SpawnEnemy(SmallFighter, -0.75*HEIGHT)
-		g.SpawnEnemy(MediumFighter, -1.5*HEIGHT)
-		g.SpawnEnemy(TurretFighter, -1*HEIGHT)
-		g.SpawnEnemy(Boss, -2.25*HEIGHT)
+			// Turrets - spawn after 3000 points
+			if ship.Points > 3000 {
+				g.SpawnEnemyNearShip(TurretFighter, ship)
+			}
 
-		g.SpawnText("WAVE "+strconv.Itoa(g.Level.LevelNum), 0)
-		g.Level.Bomb = MaxBomb
-		g.Audio.Play(8)
+			// Boss - rare spawn after 5000 points
+			if ship.Points > 5000 && g.GameRNG.Random() > 0.9 {
+				g.SpawnEnemyNearShip(Boss, ship)
+			}
+		}
 	}
 }
 
-// UpdateEnemies updates and renders enemies.
+// UpdateEnemies updates and renders enemies using the Entity interface.
 func (g *Game) UpdateEnemies() {
 	for i, e := range g.Enemies {
-		if !e.Render(g) {
+		if !e.Update(g) {
 			// enemy no longer exists
 			g.RemoveEnemy(i)
 		}
 	}
-
-	// for i := len(g.Enemies) - 1; i >= 0; i-- {
-
-	// 	enemyDestroyed := false
-	// 	g.Bullets.ForEachReverse(func(bullet *Bullet, bulletIdx int) {
-	// 		if enemyDestroyed {
-	// 			return
-	// 		}
-	// 		if bullet.Y < enemy.Y+hitboxD && bullet.Y > enemy.Y-hitboxD &&
-	// 			bullet.X > enemy.X-hitboxD && bullet.X < enemy.X+hitboxD {
-
-	// 			g.Level.P++
-	// 			g.Explode(bullet.X, bullet.Y, 0)
-	// 			g.Bullets.Release(bulletIdx)
-
-	// 			enemy.Health--
-	// 			if enemy.Health <= 0 {
-	// 				g.Level.P += 100
-	// 				g.SpawnBonus(enemy.X, enemy.Y, 0, 0, "")
-	// 				g.Explode(enemy.X, enemy.Y, enemy.Radius*2)
-	// 				g.Explode(enemy.X, enemy.Y, enemy.Radius*3)
-	// 				vol := enemy.DistanceVolume(g.Ships.X, g.Ships.Y, float64(HEIGHT))
-	// 				g.Audio.PlayWithPan(10, enemy.AudioPan(), vol)
-	// 				g.RemoveEnemy(i)
-	// 				enemyDestroyed = true
-	// 			} else {
-	// 				// hit sound
-	// 				vol := enemy.DistanceVolume(g.Ships.X, g.Ships.Y, float64(HEIGHT))
-	// 				g.Audio.PlayWithPan(9, enemy.AudioPan(), vol)
-	// 			}
-	// 		}
-	// 	})
-	// }
-
-	// Update enemy-reactive synth layers
-	g.updateEnemySynthLayers()
 }
 
-// updateEnemySynthLayers calculates enemy metrics and updates synth.
-func (g *Game) updateEnemySynthLayers() {
-	// enemyCount := len(g.Enemies)
-	// if enemyCount == 0 {
-	// 	g.Audio.UpdateEnemySynth(0, float64(HEIGHT), 9999)
-	// 	return
-	// }
-
-	// // Calculate average enemy Y position and closest distance
-	// var totalY float64
-	// closestDist := 9999.0
-
-	// for _, enemy := range g.Enemies {
-	// 	enemyY := enemy.Y + enemy.YOffset
-	// 	totalY += enemyY
-
-	// 	// Distance from enemy to player
-	// 	dx := enemy.X - g.Ships.X
-	// 	dy := enemyY - g.Ships.Y
-	// 	dist := math.Sqrt(dx*dx + dy*dy)
-	// 	if dist < closestDist {
-	// 		closestDist = dist
-	// 	}
-	// }
-
-	// avgY := totalY / float64(enemyCount)
-	// g.Audio.UpdateEnemySynth(enemyCount, avgY, closestDist)
+// RenderBases renders all bases with their shields.
+func (g *Game) RenderBases() {
+	for _, base := range g.Bases {
+		base.Render(g)
+	}
 }
-
-// RenderEnergyBar renders the energy bar HUD.
-// func (g *Game) RenderEnergyBar() {
-// 	if g.Ships.OSD > 0 {
-// 		barX := int(g.Ships.X) - 32
-// 		barY := int(g.Ships.Y) + 63
-// 		colorValue := g.Ships.E * 512 / 100
-
-// 		g.Ctx.Set("globalAlpha", float64(g.Ships.OSD)/float64(ShipMaxOSD))
-// 		g.Ctx.Set("fillStyle", Theme.EnergyBarBackground)
-// 		g.Ctx.Call("fillRect", barX, barY, 64, 4)
-
-// 		var r, gr int
-// 		if colorValue > 255 {
-// 			r = 512 - colorValue
-// 			gr = 255
-// 		} else {
-// 			r = 255
-// 			gr = colorValue
-// 		}
-// 		g.Ctx.Set("fillStyle", "rgb("+strconv.Itoa(r)+","+strconv.Itoa(gr)+",0)")
-// 		g.Ctx.Call("fillRect", barX, barY, g.Ships.E*64/100, 4)
-
-// 		g.Ctx.Set("lineWidth", Theme.EnergyBarLineWidth)
-// 		g.Ctx.Set("strokeStyle", Theme.EnergyBarBorder)
-// 		g.Ctx.Call("strokeRect", barX, barY, 64, 4)
-// 		g.Ctx.Set("globalAlpha", 1)
-
-// 		if g.Ships.E >= 25 {
-// 			g.Ships.OSD--
-// 		}
-// 	}
-// }
 
 func min(a, b int) int {
 	if a < b {

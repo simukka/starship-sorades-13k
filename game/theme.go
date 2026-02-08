@@ -16,6 +16,12 @@ var Theme = struct {
 	ShieldColor     string
 	ShieldGlowColor string
 
+	// Base shield colors
+	BaseShieldColor     string
+	BaseShieldGlowColor string
+	BaseShieldBorder    string
+	BaseColor           string
+
 	// Bullet/projectile colors
 	BulletColor string
 	BulletGlow  string
@@ -24,9 +30,24 @@ var Theme = struct {
 	TorpedoColor string
 	TorpedoGlow  string
 
-	// Enemy colors
+	// Enemy colors - Apple silver/white theme (default)
 	EnemyColor string
 	EnemyGlow  string
+
+	// Enemy type-specific colors (Apple brand history)
+	// SmallFighter: 1984-1998 Rainbow Apple era
+	EnemySmallColor string
+	EnemySmallGlow  string
+	// MediumFighter: 1998-2001 Bondi Blue iMac era
+	EnemyMediumColor string
+	EnemyMediumGlow  string
+	// TurretFighter: 2001-2007 iPod era (white/chrome)
+	EnemyTurretColor string
+	EnemyTurretGlow  string
+	// Boss: 2013+ Modern era (Space Gray/Product RED)
+	EnemyBossColor  string
+	EnemyBossGlow   string
+	EnemyBossAccent string
 
 	// Explosion colors
 	ExplosionColor     string
@@ -76,26 +97,46 @@ var Theme = struct {
 	BackgroundLineColor: "#111",
 	BackgroundGlow:      "#444",
 
-	// Player ship colors - green/lime theme
-	ShipColor:       "#9F0",
-	ShipGlow:        "#9F0",
+	// Player ship colors - Vipps MobilePay orange theme
+	ShipColor:       "#FF5B24",
+	ShipGlow:        "#FF5B24",
 	ShipCenterColor: "#FFF",
 
-	// Shield colors - bright green
+	// Shield colors - Vipps orange
 	ShieldColor:     "#000",
-	ShieldGlowColor: "#CF0",
+	ShieldGlowColor: "#FF7A4D",
 
-	// Bullet/projectile colors - yellow-green
-	BulletColor: "#CF0",
-	BulletGlow:  "#CF0",
+	// Base shield colors - MobilePay purple/violet theme
+	BaseShieldColor:     "rgba(102, 34, 255, 0.15)",
+	BaseShieldGlowColor: "#62F",
+	BaseShieldBorder:    "rgba(102, 34, 255, 0.6)",
+	BaseColor:           "#62F",
 
-	// Torpedo colors - purple/violet
-	TorpedoColor: "#62F",
-	TorpedoGlow:  "#62F",
+	// Bullet/projectile colors - Vipps orange
+	BulletColor: "#FF5B24",
+	BulletGlow:  "#FF7A4D",
 
-	// Enemy colors - purple/violet (same as torpedoes)
-	EnemyColor: "#62F",
-	EnemyGlow:  "#62F",
+	// Torpedo colors - Apple silver/gray
+	TorpedoColor: "#A2AAAD",
+	TorpedoGlow:  "#C0C0C0",
+
+	// Enemy colors - Apple silver/white theme (default)
+	EnemyColor: "#E0E0E0",
+	EnemyGlow:  "#C0C0C0",
+
+	// SmallFighter: 1984-1998 Rainbow Apple era (green from rainbow)
+	EnemySmallColor: "#5AC94D",
+	EnemySmallGlow:  "#6EDB5E",
+	// MediumFighter: 1998-2001 Bondi Blue iMac era
+	EnemyMediumColor: "#0095D9",
+	EnemyMediumGlow:  "#00B4FF",
+	// TurretFighter: 2001-2007 iPod era (white/chrome)
+	EnemyTurretColor: "#F5F5F7",
+	EnemyTurretGlow:  "#FFFFFF",
+	// Boss: 2013+ Modern era (Space Gray with Product RED)
+	EnemyBossColor:  "#86868B",
+	EnemyBossGlow:   "#A1A1A6",
+	EnemyBossAccent: "#FF3B30",
 
 	// Explosion colors - orange/red
 	ExplosionColor:     "#F63",

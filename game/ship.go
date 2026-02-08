@@ -10,9 +10,11 @@ import (
 // Ship holds player ship state.
 type Ship struct {
 	X, Y          float64
+	VelX, VelY    float64 // Velocity for infinite world movement
 	XAcc, YAcc    float64
-	Angle         float64
-	E             int // Energy/health
+	Angle         float64 // Now used as actual rotation angle in radians
+	E             int     // Energy/health
+	Points        int     // Score/points for this ship (determines enemy strength)
 	Timeout       int
 	Weapon        int
 	Reload        int
@@ -22,6 +24,15 @@ type Ship struct {
 	OriginalImage *js.Object
 	Weapons       []*Weapon
 	local         bool
+	Paused        bool //Ship is paused
+	InBase        bool // Ship is inside a base shield
+	RepairTimer   int  // Frames until next repair tick while in base
+
+	// Targeting system
+	Target      *Enemy // Currently locked target
+	LockingOn   *Enemy // Enemy being locked onto (not yet locked)
+	LockTimer   int    // Frames remaining until lock completes
+	LockMaxTime int    // Total frames required for this lock
 }
 
 type Weapon struct {
@@ -29,10 +40,58 @@ type Weapon struct {
 	AudioID int
 }
 
-// AudioPan returns a pan value (-1.0 to 1.0) based on the ship's X position.
-// Left edge = -1.0, center = 0.0, right edge = 1.0
+// AudioPan returns a pan value (-1.0 to 1.0) based on the ship's screen position.
+// In infinite world mode, the local player ship is always at the camera center (pan = 0).
+// For multiplayer, this would calculate position relative to the local camera.
 func (s *Ship) AudioPan() float64 {
-	return (s.X/WIDTH)*2 - 1
+	// In single-player, the camera follows the ship, so it's always centered
+	if s.local {
+		return 0.0
+	}
+	// For non-local ships (future multiplayer), would need camera reference
+	return 0.0
+}
+
+// GetPosition implements Entity interface - returns the ship's world coordinates.
+func (s *Ship) GetPosition() (x, y float64) {
+	return s.X, s.Y
+}
+
+// GetAngle implements Entity interface - returns the ship's facing angle in radians.
+func (s *Ship) GetAngle() float64 {
+	return s.Angle
+}
+
+// GetHealth implements Entity interface - returns the ship's current energy/health.
+func (s *Ship) GetHealth() int {
+	return s.E
+}
+
+// SetHealth implements Entity interface - sets the ship's energy/health.
+func (s *Ship) SetHealth(health int) {
+	s.E = health
+}
+
+// GetRadius implements Entity interface - returns the ship's collision radius.
+func (s *Ship) GetRadius() float64 {
+	return float64(ShipR)
+}
+
+// IsAlive implements Entity interface - returns true if the ship has health remaining.
+func (s *Ship) IsAlive() bool {
+	return s.E > 0
+}
+
+// Update implements Entity interface - updates the ship state and renders it.
+// Returns false if the ship should be removed (death).
+func (s *Ship) Update(g *Game) bool {
+	if !s.IsAlive() {
+		return false
+	}
+
+	// Render the ship
+	s.Render(g)
+	return true
 }
 
 func (s *Ship) Pickup(g *Game, item *Bonus) bool {
@@ -43,17 +102,17 @@ func (s *Ship) Pickup(g *Game, item *Bonus) bool {
 			if len(s.Weapons) < MaxWeapons {
 				s.AddWeapon()
 				// todo: make audio level reflective of weapon count
-				g.Audio.PlayWithPan(5, s.AudioPan(), 1.0)
+				g.Audio.PlayLocal(5, 1.0)
 			} else {
-				g.Audio.PlayWithPan(6, s.AudioPan(), 1.0)
+				g.Audio.PlayLocal(6, 1.0)
 			}
 		case "E":
 			if s.E < 100 {
 				s.OSD = ShipMaxOSD
 				// todo: make audio level reflective of energy level
-				g.Audio.PlayWithPan(5, s.AudioPan(), 1.0)
+				g.Audio.PlayLocal(5, 1.0)
 			} else {
-				g.Audio.PlayWithPan(6, s.AudioPan(), 1.0)
+				g.Audio.PlayLocal(6, 1.0)
 			}
 			s.E += 5
 			if s.E > 100 {
@@ -62,30 +121,32 @@ func (s *Ship) Pickup(g *Game, item *Bonus) bool {
 		case "S":
 			s.Shield.T += s.Shield.MaxT * s.Shield.MaxT * 2 /
 				(s.Shield.T + s.Shield.MaxT*2)
-			g.Audio.PlayWithPan(3, s.AudioPan(), 1.0)
+			g.Audio.PlayLocal(3, 1.0)
 		case "B":
-			for j := len(g.Enemies) - 1; j >= 0; j-- {
-				g.Enemies[j].Health--
-			}
-			v := 0.0
-			g.Bullets.ForEachKindReverse(TorpedoBullet, func(b *Bullet, i int) {
-				v += 0.05
-				if v > 0.7 {
-					v = 0.7
-				}
-				g.Explode(b.X, b.Y, 0)
-				g.Audio.PlayWithPan(13, b.AudioPan(), v)
-				g.Bullets.Release(i)
-			})
+			// for j := len(g.Enemies) - 1; j >= 0; j-- {
+			// 	g.Enemies[j].Health--
+			// }
+			// v := 0.0
+			// // TODO: only target the nearest torpedos within a distance from the ship.
+			// // As the ship has more weapons, the distance increases.
+			// g.Bullets.ForEachKindReverse(TorpedoBullet, func(b *Bullet, i int) {
+			// 	v += 0.01
+			// 	if v > 0.7 {
+			// 		v = 0.7
+			// 	}
+			// 	g.Explode(b.X, b.Y, 0)
+			// 	g.Audio.PlayWithPan(13, b.AudioPan(), v)
+			// 	g.Bullets.Release(i)
+			// })
 			// for j := 0; j < min(g.Torpedos.ActiveCount, 5); j++ {
 			// 	g.Explode(g.Torpedos.Pool[j].X, g.Torpedos.Pool[j].Y, 0)
 			// }
 			// g.Torpedos.Clear()
-			g.Level.Bomb = MaxBomb
+			// g.Level.Bomb = MaxBomb
 			// TODO make audio level reflective of the number of torpedos cleared
 			// g.Audio.PlayWithPan(13, s.AudioPan(), 1.0)
 		default:
-			g.Audio.PlayWithPan(7, s.AudioPan(), 1.0)
+			g.Audio.PlayLocal(7, 1.0)
 		}
 
 		return true
@@ -95,57 +156,59 @@ func (s *Ship) Pickup(g *Game, item *Bonus) bool {
 }
 
 func (s *Ship) Move(g *Game, keys map[int]bool) {
-	// Movement input with visual tilt
-	s.Angle *= ShipAngleFactor
-
-	// Left arrow
+	// Rotation input (Left/Right arrows rotate the ship)
+	// Left arrow - rotate counter-clockwise
 	if keys[37] {
-		if s.X >= WIDTH && s.XAcc > 0 {
-			s.XAcc = 0
-		}
-		s.XAcc -= ShipACC
-		s.Angle = (s.Angle+1)*ShipAngleFactor - 1
+		s.Angle -= ShipRotationSpeed
 	}
-	// Up arrow
-	if keys[38] {
-		if s.Y >= HEIGHT && s.YAcc > 0 {
-			s.YAcc = 0
-		}
-		s.YAcc -= ShipACC
-	}
-	// Right arrow
+	// Right arrow - rotate clockwise
 	if keys[39] {
-		if s.X < 0 && s.XAcc < 0 {
-			s.XAcc = 0
-		}
-		s.XAcc += ShipACC
-		s.Angle = (s.Angle-1)*ShipAngleFactor + 1
+		s.Angle += ShipRotationSpeed
 	}
-	// Down arrow
+
+	// Track if thrusting this frame
+	thrusting := false
+
+	// Thrust input (Up/Down arrows control forward/backward)
+	// Up arrow - thrust forward (in direction ship is facing)
+	if keys[38] {
+		s.VelX += math.Sin(s.Angle) * ShipThrustAcc
+		s.VelY -= math.Cos(s.Angle) * ShipThrustAcc
+		thrusting = true
+	}
+	// Down arrow - thrust backward (reverse)
 	if keys[40] {
-		if s.Y < 0 && s.YAcc < 0 {
-			s.YAcc = 0
-		}
-		s.YAcc += ShipACC
+		s.VelX -= math.Sin(s.Angle) * ShipThrustAcc * 0.5
+		s.VelY += math.Cos(s.Angle) * ShipThrustAcc * 0.5
+		thrusting = true
 	}
 
-	// Screen boundary collision
-	if s.X < 0 && s.XAcc < 0 {
-		s.X = 0
-	} else if s.X >= WIDTH && s.XAcc > 0 {
-		s.X = WIDTH - 1
-	}
-	if s.Y < 0 && s.YAcc < 0 {
-		s.Y = 0
-	} else if s.Y >= HEIGHT && s.YAcc > 0 {
-		s.Y = HEIGHT - 1
+	// Clamp velocity to max speed
+	speed := math.Sqrt(s.VelX*s.VelX + s.VelY*s.VelY)
+	if speed > ShipMaxSpeed {
+		scale := ShipMaxSpeed / speed
+		s.VelX *= scale
+		s.VelY *= scale
 	}
 
-	// Apply velocity and damping
-	s.X += s.XAcc
-	s.Y += s.YAcc
-	s.XAcc *= ShipACCFactor
-	s.YAcc *= ShipACCFactor
+	// Play thrust sound with volume relative to velocity
+	if thrusting && speed > 1.0 {
+		// Volume scales from 0.1 at low speed to 0.4 at max speed
+		volume := 0.1 + (speed/ShipMaxSpeed)*0.3
+		g.Audio.PlayLocal(23, volume)
+	}
+
+	// Apply velocity to position (infinite world - no boundaries)
+	s.X += s.VelX
+	s.Y += s.VelY
+
+	// Apply drag/damping
+	s.VelX *= ShipACCFactor
+	s.VelY *= ShipACCFactor
+
+	// Update camera to follow ship
+	g.Camera.X = s.X
+	g.Camera.Y = s.Y
 }
 
 // WeaponAngleStep defines the angular separation between weapon upgrades in radians.
@@ -153,7 +216,7 @@ func (s *Ship) Move(g *Game, keys map[int]bool) {
 const WeaponAngleStep = math.Pi / 12
 
 // WeaponSpeed defines the base projectile speed for weapons.
-const WeaponSpeed = 16.0
+const WeaponSpeed = 50.0
 
 // MaxWeapons defines the maximum number of weapons (full 360° coverage at 15° intervals = 24 weapons,
 // but we stop at 180° coverage = 13 weapons: 0°, ±15°, ±30°, ±45°, ±60°, ±75°, ±90°)
@@ -222,6 +285,9 @@ func (s *Ship) Collision(g *Game, bullet *Bullet) bool {
 	if bullet.Kind != TorpedoBullet {
 		return false
 	}
+	if g.IsShipProtectedByBase(s) {
+		return false
+	}
 	if s.Y < (bullet.Y+ShipCollisionD) && s.Y > (bullet.Y-ShipCollisionD) &&
 		s.X < bullet.X+ShipCollisionE && s.X > (bullet.X-ShipCollisionE) {
 		s.Hurt(g, 10)
@@ -235,9 +301,25 @@ func (s *Ship) Collision(g *Game, bullet *Bullet) bool {
 func (s *Ship) Render(g *Game) {
 	s.Timeout--
 
+	// Update InBase status and handle repair
+	s.InBase = g.IsShipProtectedByBase(s)
+	if s.InBase && s.E < 100 {
+		// Repair while in base - 1 health every 55 frames (~1.8 seconds)
+		// Full repair from 1% takes about 3 minutes
+		s.RepairTimer--
+		if s.RepairTimer <= 0 {
+			s.E++
+			s.RepairTimer = 55 // Reset timer
+			s.OSD = ShipMaxOSD // Show energy bar when repairing
+		}
+	}
+
+	// Convert world position to screen position
+	screenX, screenY := g.Camera.WorldToScreen(s.X, s.Y)
+
 	g.Ctx.Call("save")
-	g.Ctx.Call("translate", s.X, s.Y)
-	g.Ctx.Call("rotate", s.Angle*ShipMaxAngle/180*math.Pi)
+	g.Ctx.Call("translate", screenX, screenY)
+	g.Ctx.Call("rotate", s.Angle) // Use actual rotation angle (radians)
 	g.Ctx.Call("drawImage", s.Image, -ShipR/2, -ShipR)
 	g.Ctx.Call("restore")
 
@@ -247,11 +329,11 @@ func (s *Ship) Render(g *Game) {
 
 		if s.Shield.T > 30 || mathRandom > 0.5 {
 			g.Ctx.Call("drawImage", s.Shield.Image,
-				int(s.X)-ShipR, int(s.Y)-ShipR)
+				int(screenX)-ShipR, int(screenY)-ShipR)
 		}
 		s.Shield.T--
 		if s.Shield.T == 0 {
-			g.Audio.PlayWithPan(4, s.AudioPan(), 1.0)
+			g.Audio.PlayLocal(4, 1.0)
 		}
 	}
 
@@ -262,10 +344,16 @@ func (s *Ship) Render(g *Game) {
 
 // Fire creates bullets from all of the ship's equipped weapons.
 // Each weapon in the Weapons slice fires one bullet per call.
-// Bullet velocity is based on the weapon's offset (X, Y) plus half the ship's current momentum.
-// Bullets spawn at the ship's position with slight random offset for visual variety.
+// If a target is locked, all weapons aim at the target.
+// Otherwise, bullet velocity is based on the weapon's angle offset rotated by ship's facing angle.
+// Bullets spawn at the ship's position and travel in the combined direction.
+// Cannot fire while inside a base shield (safe zone).
 func (s *Ship) Fire(g *Game) {
-	Debug("FIRE")
+	// Cannot fire while inside base shield
+	if s.InBase {
+		return
+	}
+
 	s.Reload--
 
 	weapons := len(s.Weapons)
@@ -277,26 +365,51 @@ func (s *Ship) Fire(g *Game) {
 
 	// Fire from each equipped weapon
 	for _, w := range s.Weapons {
+		// if no target, not able to fire
+		if s.Target == nil {
+			continue
+		}
+
 		// Try to acquire a bullet from the pool
 		bullet := g.Bullets.AcquireKind(StandardBullet)
 		if bullet == nil {
 			continue // Pool exhausted, skip this weapon
 		}
 
-		// Calculate bullet velocity: weapon direction + ship momentum influence
-		finalXVel := w.X + s.XAcc/2
-		finalYVel := w.Y + s.YAcc/2
+		var totalAngle float64
+
+		// If we have a locked target, aim all weapons at it with prediction
+		if s.Target != nil && s.Target.IsAlive() {
+			// Calculate predicted intercept position
+			totalAngle = s.PredictTargetAngle(s.Target, WeaponSpeed)
+		} else {
+			// No target
+			continue
+		}
+
+		// Calculate bullet velocity in the combined direction
+		bulletSpeed := WeaponSpeed
+		finalXVel := math.Sin(totalAngle) * bulletSpeed
+		finalYVel := -math.Cos(totalAngle) * bulletSpeed
+
+		// Add ship velocity to projectile (projectile speed is relative to ship motion)
+		finalXVel += s.VelX
+		finalYVel += s.VelY
 
 		// Initialize bullet properties
 		bullet.T = BulletMaxT // Set lifetime
-		// Add random offset based on velocity for spread effect
-		bullet.X = s.X + math.Floor(js.Global.Get("Math").Call("random").Float()*finalXVel)
-		bullet.Y = s.Y + math.Floor(js.Global.Get("Math").Call("random").Float()*finalYVel)
+
+		// Spawn bullet at weapon position (offset from ship center based on weapon direction)
+		// Scale weapon vector to get spawn offset (w.X/Y are at WeaponSpeed magnitude)
+		spawnOffsetScale := 0.4
+		bullet.X = s.X + w.X*spawnOffsetScale
+		bullet.Y = s.Y + w.Y*spawnOffsetScale
+
 		bullet.XAcc = finalXVel
 		bullet.YAcc = finalYVel
 
-		// Play weapon fire sound with stereo panning based on ship position
-		g.Audio.PlayWithPan(w.AudioID, s.AudioPan(), 1.0)
+		// Play weapon fire sound (local to player, not filtered by shield)
+		g.Audio.PlayLocal(w.AudioID, 0.5)
 	}
 }
 
@@ -307,13 +420,17 @@ func (s *Ship) Fire(g *Game) {
 // When health reaches 0, the ship explodes and the game ends.
 // Taking damage also removes one weapon upgrade.
 func (s *Ship) Hurt(g *Game, damage int) {
-	// Ship is invisible to torpedos when debug UI is active
-	if g.DebugUI.Visible {
+	if s.Paused {
 		return
 	}
+
+	if g.IsShipProtectedByBase(s) {
+		return
+	}
+
 	// Shield absorbs all damage while active
 	if s.Shield.T > 0 {
-		g.Audio.PlayWithPan(2, s.AudioPan(), 1.0)
+		g.Audio.PlayLocal(2, 1.0)
 		return
 	}
 
@@ -328,20 +445,20 @@ func (s *Ship) Hurt(g *Game, damage int) {
 	}
 
 	// Check for death - create large explosions
-	if s.E == 0 && !g.Level.Paused {
+	if s.E == 0 {
 		g.Explode(s.X, s.Y, 512)
 		g.Explode(s.X, s.Y, 1024)
-		g.Audio.PlayWithPan(14, s.AudioPan(), 1.0) // Death sound
+		g.Audio.PlayLocal(14, 1.0) // Death sound
 	} else if s.E < 25 {
-		g.Audio.PlayWithPan(17, s.AudioPan(), 1.0) // Low health warning
+		g.Audio.PlayLocal(17, 1.0) // Low health warning
 	}
 
 	// Play hit sound
-	g.Audio.PlayWithPan(1, s.AudioPan(), 1.0)
+	g.Audio.PlayLocal(1, 1.0)
 
 	// Lose one weapon upgrade on damage
 	weapons := len(s.Weapons)
-	if weapons > 0 {
+	if weapons > 1 {
 		s.Weapons = s.Weapons[:weapons-1]
 	}
 
@@ -350,8 +467,11 @@ func (s *Ship) Hurt(g *Game, damage int) {
 }
 
 func (s *Ship) RenderEnergyBar(g *Game) {
-	barX := int(s.X) - 32
-	barY := int(s.Y) + 63
+	// Convert world position to screen position
+	screenX, screenY := g.Camera.WorldToScreen(s.X, s.Y)
+
+	barX := int(screenX) - 32
+	barY := int(screenY) + 63
 	colorValue := s.E * 512 / 100
 
 	g.Ctx.Set("globalAlpha", float64(s.OSD)/float64(ShipMaxOSD))
@@ -377,4 +497,167 @@ func (s *Ship) RenderEnergyBar(g *Game) {
 	if s.E >= 25 {
 		s.OSD--
 	}
+}
+
+// UpdateTargeting handles the targeting lock-on system.
+// Call this each frame to update lock progress and validate targets.
+func (s *Ship) UpdateTargeting(g *Game) {
+	// If we have a locked target, validate it's still alive and on screen
+	if s.Target != nil {
+		if !s.Target.IsAlive() || !g.Camera.IsOnScreen(s.Target.X, s.Target.Y+s.Target.YOffset, s.Target.Radius) {
+			s.Target = nil
+		}
+	}
+
+	// If we're locking onto something, update the lock timer
+	if s.LockingOn != nil {
+		// Validate the locking target is still valid
+		if !s.LockingOn.IsAlive() || !g.Camera.IsOnScreen(s.LockingOn.X, s.LockingOn.Y+s.LockingOn.YOffset, s.LockingOn.Radius) {
+			s.LockingOn = nil
+			s.LockTimer = 0
+			s.LockMaxTime = 0
+			return
+		}
+
+		s.LockTimer--
+		if s.LockTimer <= 0 {
+			// Lock complete!
+			s.Target = s.LockingOn
+			s.LockingOn = nil
+			s.LockMaxTime = 0
+			// Play lock-on sound
+			g.Audio.PlayLocal(6, 1.0)
+		}
+	}
+}
+
+// InitiateTargetLock starts locking onto the nearest on-screen enemy.
+// If already locked, this will switch to a new target.
+// Lock time is random, up to 1 second (30 frames at 30 FPS).
+func (s *Ship) InitiateTargetLock(g *Game) {
+	// Find nearest enemy that is on screen
+	var nearestEnemy *Enemy
+	nearestDistSq := math.MaxFloat64
+
+	for _, enemy := range g.Enemies {
+		if !enemy.IsAlive() {
+			continue
+		}
+
+		// Check if enemy is on screen
+		if !g.Camera.IsOnScreen(enemy.X, enemy.Y+enemy.YOffset, enemy.Radius) {
+			continue
+		}
+
+		// Calculate distance to ship
+		dx := enemy.X - s.X
+		dy := (enemy.Y + enemy.YOffset) - s.Y
+		distSq := dx*dx + dy*dy
+
+		if distSq < nearestDistSq {
+			nearestDistSq = distSq
+			nearestEnemy = enemy
+		}
+	}
+
+	if nearestEnemy != nil {
+		// Start locking onto this enemy
+		s.LockingOn = nearestEnemy
+		// Random lock time: 5-30 frames (0.17s to 1s at 30 FPS)
+		s.LockTimer = 5 + int(js.Global.Get("Math").Call("random").Float()*25)
+		s.LockMaxTime = s.LockTimer
+		// Clear any existing lock
+		s.Target = nil
+		// Play targeting locking sound
+		g.Audio.PlayLocal(22, 0.6)
+	}
+}
+
+// ClearTarget removes the current target lock.
+func (s *Ship) ClearTarget() {
+	s.Target = nil
+	s.LockingOn = nil
+	s.LockTimer = 0
+	s.LockMaxTime = 0
+}
+
+// PredictTargetAngle calculates the angle to shoot at to hit a moving target.
+// Uses quadratic intercept calculation to predict where the target will be
+// when the projectile reaches it, accounting for:
+// - Distance between ship and target
+// - Target's current velocity
+// - Projectile speed (plus ship velocity contribution)
+//
+// Returns the angle in radians to aim at the predicted intercept point.
+// Falls back to direct aim if no intercept solution exists.
+func (s *Ship) PredictTargetAngle(target *Enemy, projectileSpeed float64) float64 {
+	// Target position (accounting for YOffset)
+	targetX := target.X
+	targetY := target.Y + target.YOffset
+
+	// Relative position
+	dx := targetX - s.X
+	dy := targetY - s.Y
+
+	// Target velocity
+	tvx := target.VelX
+	tvy := target.VelY
+
+	// Account for ship velocity in the effective projectile speed
+	// The projectile will inherit ship velocity, so we consider relative velocity
+	// For simplicity, we use the raw projectile speed here since ship velocity
+	// is added to the final bullet velocity anyway
+
+	// Quadratic coefficients for time-to-intercept:
+	// a*t² + b*t + c = 0
+	// where t is the time for the projectile to reach the target
+	a := tvx*tvx + tvy*tvy - projectileSpeed*projectileSpeed
+	b := 2 * (dx*tvx + dy*tvy)
+	c := dx*dx + dy*dy
+
+	var t float64
+
+	// Solve quadratic equation
+	if math.Abs(a) < 0.0001 {
+		// Linear case (target and projectile have similar speeds)
+		if math.Abs(b) > 0.0001 {
+			t = -c / b
+		} else {
+			// No solution, aim directly
+			t = 0
+		}
+	} else {
+		discriminant := b*b - 4*a*c
+		if discriminant < 0 {
+			// No real solution - target is too fast to intercept
+			// Fall back to direct aim
+			return math.Atan2(dx, -dy)
+		}
+
+		sqrtDisc := math.Sqrt(discriminant)
+		t1 := (-b - sqrtDisc) / (2 * a)
+		t2 := (-b + sqrtDisc) / (2 * a)
+
+		// Choose the smallest positive time
+		if t1 > 0 && t2 > 0 {
+			t = math.Min(t1, t2)
+		} else if t1 > 0 {
+			t = t1
+		} else if t2 > 0 {
+			t = t2
+		} else {
+			// Both negative - target is moving away too fast
+			return math.Atan2(dx, -dy)
+		}
+	}
+
+	// Predict target position at time t
+	predictedX := targetX + tvx*t
+	predictedY := targetY + tvy*t
+
+	// Calculate angle to predicted position
+	predDx := predictedX - s.X
+	predDy := predictedY - s.Y
+
+	return math.Atan2(predDx, -predDy)
 }

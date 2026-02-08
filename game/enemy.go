@@ -2,6 +2,7 @@ package game
 
 import (
 	"math"
+	"strconv"
 
 	"github.com/gopherjs/gopherjs/js"
 )
@@ -27,12 +28,15 @@ var EnemyKindNames = map[EnemyKind]string{
 type Enemy struct {
 	Image         *js.Object
 	X, Y          float64
+	VelX, VelY    float64 // Velocity for predictive targeting
 	YStop         float64
 	YOffset       float64
 	Radius        float64
 	Angle         float64
 	MaxAngle      float64
 	Health        int
+	MaxHealth     int // Maximum health for health bar calculation
+	OSD           int // On-screen display timer for health bar
 	FireTimer     int
 	FireDirection float64
 	TActive       int
@@ -44,64 +48,107 @@ type Enemy struct {
 
 // EnemySpawnConfig holds configuration for spawning enemies.
 type EnemySpawnConfig struct {
-	CountBase      int
-	CountPerLevel  int
-	MaxAngle       float64
-	HealthBase     int
-	HealthPerLevel int
-	TBase          int
-	TRange         int
-	TStart         int
-	YStopBase      float64
-	YStopRange     float64
-	YOffsetMult    float64 // yoffset multiplyer
-	UseYStep       bool    // For turret-style Y positioning
-	HasFireDir     bool    // For turrets with rotating fire
+	CountBase       int
+	CountPerPoints  int // Points threshold for +1 enemy count (e.g., 1000 = +1 per 1000 points)
+	MaxAngle        float64
+	HealthBase      int
+	HealthPerPoints int // Points threshold for +1 health (e.g., 500 = +1 per 500 points)
+	TBase           int
+	TRange          int
+	TStart          int
+	YStopBase       float64
+	YStopRange      float64
+	YOffsetMult     float64 // yoffset multiplyer
+	UseYStep        bool    // For turret-style Y positioning
+	HasFireDir      bool    // For turrets with rotating fire
 }
 
 // Standard enemy spawn configurations
 var enemyConfigs = map[EnemyKind]EnemySpawnConfig{
-	// Type 0: Small fighters
+	// Type 0: Small fighters - spawn frequently, scale with points
 	SmallFighter: {
-		CountBase: 10, CountPerLevel: 1,
-		MaxAngle: math.Pi / 32, HealthBase: 12, HealthPerLevel: 1,
+		CountBase: 3, CountPerPoints: 2000,
+		MaxAngle: math.Pi / 32, HealthBase: 8, HealthPerPoints: 1000,
 		TBase: 0, TRange: 120, YStopBase: HEIGHT / 8, YStopRange: HEIGHT / 4,
 	},
-	// Type 1: Medium fighters
+	// Type 1: Medium fighters - fewer but tougher
 	MediumFighter: {
-		CountBase: 1, CountPerLevel: 1,
-		MaxAngle: math.Pi / 16, HealthBase: 20, HealthPerLevel: 2,
+		CountBase: 1, CountPerPoints: 3000,
+		MaxAngle: math.Pi / 16, HealthBase: 15, HealthPerPoints: 800,
 		TBase: 0, TRange: 120, YStopBase: HEIGHT / 8, YStopRange: HEIGHT / 4,
 	},
-	// Type 2: Turrets
+	// Type 2: Turrets - rare early, more common later
 	TurretFighter: {
-		CountBase: 0, CountPerLevel: 1,
-		MaxAngle: math.Pi * 32, HealthBase: 28, HealthPerLevel: 3,
+		CountBase: 0, CountPerPoints: 5000,
+		MaxAngle: math.Pi * 32, HealthBase: 20, HealthPerPoints: 600,
 		TBase: 0, TRange: 30, YStopBase: HEIGHT / 2, YStopRange: 0,
 		UseYStep: true, HasFireDir: true,
 	},
 	Boss: {
-		CountBase: 0, CountPerLevel: 0,
+		CountBase: 0, CountPerPoints: 10000,
 		YOffsetMult: 0.6,
-		MaxAngle:    math.Pi / 8, HealthBase: 36, HealthPerLevel: 4,
+		MaxAngle:    math.Pi / 8, HealthBase: 30, HealthPerPoints: 500,
 		TBase: 0, TRange: 20, TStart: 60,
 	},
 }
 
-// AudioPan returns a pan value (-1.0 to 1.0) based on the ship's X position.
-// Left edge = -1.0, center = 0.0, right edge = 1.0
-func (s *Enemy) AudioPan() float64 {
-	return (s.X/WIDTH)*2 - 1
+// AudioPan returns a pan value (-1.0 to 1.0) based on the enemy's screen position.
+// In infinite world mode, this is relative to the camera (player ship).
+// Left of camera = negative, center = 0.0, right of camera = positive.
+// Clamped to [-1, 1] range.
+func (e *Enemy) AudioPan() float64 { // If no target, return center pan
+	if e.Target == nil {
+		return 0.0
+	}
+	// Calculate screen X position relative to camera center
+	// Camera center is at WIDTH/2, so we calculate offset from center
+	screenX := e.X - e.Target.X  // Offset from player ship
+	pan := screenX / (WIDTH / 2) // Normalize to [-1, 1] range (roughly)
+
+	// Clamp to valid pan range
+	if pan > 1.0 {
+		return 1.0
+	}
+	if pan < -1.0 {
+		return -1.0
+	}
+	return pan
 }
 
-// GetPosition implements Collidable interface.
+// GetPosition implements Entity interface - returns the enemy's world coordinates.
 func (e *Enemy) GetPosition() (x, y float64) {
 	return e.X, e.Y + e.YOffset
 }
 
-// GetRadius implements Collidable interface.
+// GetAngle implements Entity interface - returns the enemy's facing angle in radians.
+func (e *Enemy) GetAngle() float64 {
+	return e.Angle
+}
+
+// GetHealth implements Entity interface - returns the enemy's current health.
+func (e *Enemy) GetHealth() int {
+	return e.Health
+}
+
+// SetHealth implements Entity interface - sets the enemy's health.
+func (e *Enemy) SetHealth(health int) {
+	e.Health = health
+}
+
+// GetRadius implements Entity interface - returns the enemy's collision radius.
 func (e *Enemy) GetRadius() float64 {
 	return e.Radius
+}
+
+// IsAlive implements Entity interface - returns true if the enemy has health remaining.
+func (e *Enemy) IsAlive() bool {
+	return e.Health > 0
+}
+
+// Update implements Entity interface - updates enemy state, targeting, and movement.
+// Returns false if the enemy should be removed (death or despawn).
+func (e *Enemy) Update(g *Game) bool {
+	return e.Render(g)
 }
 
 // DistanceVolume calculates volume based on distance to a target position.
@@ -146,28 +193,38 @@ func (e *Enemy) TargetAngle() float64 {
 func (e *Enemy) Render(g *Game) bool {
 	enemyY := e.Y + e.YOffset
 
-	// Calculate angle to player using Atan2 for accurate targeting across all quadrants
-	// TODO: Pick a target
-	r := 0
-	e.Target = g.Ships[r]
+	// Find nearest ship to target
+	var nearestShip *Ship
+	nearestDist := math.MaxFloat64
+	for _, ship := range g.Ships {
+		dx := ship.X - e.X
+		dy := ship.Y - enemyY
+		dist := dx*dx + dy*dy
+		if dist < nearestDist {
+			nearestDist = dist
+			nearestShip = ship
+		}
+	}
+	e.Target = nearestShip
+
+	// Check if enemy is too far from any ship - despawn
+	if nearestDist > EnemyDespawnDistance*EnemyDespawnDistance {
+		return false
+	}
 
 	// Normalize angle to [-π, π] range for consistent shortest-path rotation
 	angle := math.Mod(e.TargetAngle()+math.Pi, math.Pi*2) - math.Pi
-
-	// Clamp angle to enemy's maximum rotation limit
-	if angle > e.MaxAngle {
-		angle = e.MaxAngle
-	}
-	if angle < -e.MaxAngle {
-		angle = -e.MaxAngle
-	}
 
 	// Apply exponential smoothing for gradual rotation toward target
 	e.Angle = (e.Angle*EnemyAngleSmoothingFactor - angle) / (EnemyAngleSmoothingFactor + 1)
 
 	if e.Health <= 0 {
-		// we dead
-		g.Level.P += 100
+		// Enemy destroyed - award points to nearest ship (the target)
+		pointsAward := 100
+		if e.Target != nil {
+			e.Target.Points += pointsAward
+		}
+
 		g.SpawnBonus(e.X, e.Y, 0, 0, "")
 		g.Explode(e.X, e.Y, e.Radius*2)
 		g.Explode(e.X, e.Y, e.Radius*3)
@@ -178,28 +235,125 @@ func (e *Enemy) Render(g *Game) bool {
 		return false
 	}
 
+	// Move enemy toward target (follow behavior)
+	if e.Target != nil {
+		followSpeed := 1.5 // Adjust for enemy speed
+		dx := e.Target.X - e.X
+		dy := e.Target.Y - enemyY
+		dist := math.Sqrt(dx*dx + dy*dy)
+		if dist > e.Radius*2 { // Don't get too close
+			// Calculate velocity
+			e.VelX = (dx / dist) * followSpeed
+			e.VelY = (dy / dist) * followSpeed
+
+			newX := e.X + e.VelX
+			newY := e.Y + e.VelY
+
+			// Check if new position would be inside a base shield
+			// Check multiple points around the enemy to prevent slipping through
+			blocked := false
+			newEnemyY := newY + e.YOffset
+			checkRadius := e.Radius * 0.8
+			for _, base := range g.Bases {
+				// Check center and cardinal directions
+				if base.ContainsPoint(newX, newEnemyY) ||
+					base.ContainsPoint(newX, newEnemyY-checkRadius) || // top
+					base.ContainsPoint(newX, newEnemyY+checkRadius) || // bottom
+					base.ContainsPoint(newX-checkRadius, newEnemyY) || // left
+					base.ContainsPoint(newX+checkRadius, newEnemyY) { // right
+					blocked = true
+					break
+				}
+			}
+
+			// Only move if not blocked by a shield
+			if !blocked {
+				e.X = newX
+				e.Y = newY
+			} else {
+				// Blocked - zero velocity
+				e.VelX = 0
+				e.VelY = 0
+			}
+		} else {
+			// Too close - stop moving
+			e.VelX = 0
+			e.VelY = 0
+		}
+	} else {
+		e.VelX = 0
+		e.VelY = 0
+	}
+
+	// Convert world position to screen position for rendering
+	screenX, screenY := g.Camera.WorldToScreen(e.X, enemyY)
+
+	// Only render if on screen
+	if !g.Camera.IsOnScreen(e.X, enemyY, e.Radius*2) {
+		// Still alive, just off-screen
+		e.Fire(g)
+		return true
+	}
+
 	// Render enemy
 	g.Ctx.Call("save")
-	g.Ctx.Call("translate", e.X, enemyY)
+	g.Ctx.Call("translate", screenX, screenY)
 	g.Ctx.Call("rotate", e.Angle)
 	g.Ctx.Call("drawImage", e.Image,
-		-e.Radius, e.Y-enemyY-e.Radius, e.Radius*2, e.Radius*2)
+		-e.Radius, -e.Radius, e.Radius*2, e.Radius*2)
 	g.Ctx.Call("restore")
 
-	// Draw targeting indicator (red circle) when enemy has a target
-	if e.Target != nil {
+	// Render targeting reticle if this enemy is targeted or being locked
+	if g.Ship.Target == e {
+		// Locked target - red reticle
 		g.Ctx.Call("save")
-		g.Ctx.Set("strokeStyle", "rgba(255, 60, 60, 0.7)")
+		g.Ctx.Set("strokeStyle", "#ff0000")
 		g.Ctx.Set("lineWidth", 2)
+		g.Ctx.Set("shadowBlur", 8)
+		g.Ctx.Set("shadowColor", "#ff0000")
 		g.Ctx.Call("beginPath")
-		g.Ctx.Call("arc", e.X, enemyY, e.Radius*1.3, 0, math.Pi*2)
+		g.Ctx.Call("arc", screenX, screenY, e.Radius*1.5, 0, math.Pi*2)
+		g.Ctx.Call("stroke")
+		// Corner brackets
+		bracketSize := e.Radius * 0.6
+		bracketOffset := e.Radius * 1.2
+		g.Ctx.Call("beginPath")
+		// Top-left
+		g.Ctx.Call("moveTo", screenX-bracketOffset, screenY-bracketOffset+bracketSize)
+		g.Ctx.Call("lineTo", screenX-bracketOffset, screenY-bracketOffset)
+		g.Ctx.Call("lineTo", screenX-bracketOffset+bracketSize, screenY-bracketOffset)
+		// Top-right
+		g.Ctx.Call("moveTo", screenX+bracketOffset-bracketSize, screenY-bracketOffset)
+		g.Ctx.Call("lineTo", screenX+bracketOffset, screenY-bracketOffset)
+		g.Ctx.Call("lineTo", screenX+bracketOffset, screenY-bracketOffset+bracketSize)
+		// Bottom-right
+		g.Ctx.Call("moveTo", screenX+bracketOffset, screenY+bracketOffset-bracketSize)
+		g.Ctx.Call("lineTo", screenX+bracketOffset, screenY+bracketOffset)
+		g.Ctx.Call("lineTo", screenX+bracketOffset-bracketSize, screenY+bracketOffset)
+		// Bottom-left
+		g.Ctx.Call("moveTo", screenX-bracketOffset+bracketSize, screenY+bracketOffset)
+		g.Ctx.Call("lineTo", screenX-bracketOffset, screenY+bracketOffset)
+		g.Ctx.Call("lineTo", screenX-bracketOffset, screenY+bracketOffset-bracketSize)
+		g.Ctx.Call("stroke")
+		g.Ctx.Call("restore")
+	} else if g.Ship.LockingOn == e {
+		// Locking - orange pulsing reticle
+		progress := float64(g.Ship.LockMaxTime-g.Ship.LockTimer) / float64(g.Ship.LockMaxTime)
+		g.Ctx.Call("save")
+		g.Ctx.Set("strokeStyle", "#ff8800")
+		g.Ctx.Set("lineWidth", 2)
+		g.Ctx.Set("shadowBlur", 6)
+		g.Ctx.Set("shadowColor", "#ff8800")
+		g.Ctx.Call("beginPath")
+		// Draw arc showing lock progress
+		g.Ctx.Call("arc", screenX, screenY, e.Radius*1.5, -math.Pi/2, -math.Pi/2+progress*math.Pi*2)
 		g.Ctx.Call("stroke")
 		g.Ctx.Call("restore")
 	}
 
-	// move enemy
-	if e.Y < e.YStop {
-		e.Y++
+	// Render health bar if recently hit
+	if e.OSD > 0 {
+		e.RenderHealthBar(g, screenX, screenY)
 	}
 
 	// and fire at target
@@ -217,6 +371,7 @@ func (e *Enemy) Collision(g *Game, b *Bullet) bool {
 		g.Level.P++
 		g.Explode(b.X, b.Y, 0)
 		e.Health--
+		e.OSD = ShipMaxOSD // Show health bar when hit
 		g.Audio.PlayWithPan(9,
 			e.AudioPan(),
 			e.DistanceVolume(g.Ship.X, g.Ship.Y, float64(HEIGHT)))
@@ -257,75 +412,60 @@ func (e *Enemy) Fire(g *Game) bool {
 	torpedo.XAcc = math.Sin(e.TargetAngle()) * (e.Radius / 2)
 	torpedo.YAcc = math.Cos(e.TargetAngle()) * (e.Radius / 2)
 
-	// if e.Angle != 0 {
-	// 	torpedo.XAcc = math.Sin(e.Angle) * speed
-	// 	torpedo.YAcc = math.Cos(e.Angle) * speed
-	// } else {
-	// 	torpedo.XAcc = 0
-	// 	torpedo.YAcc = speed
-	// }
 	torpedo.E = 0
 
 	return true
 }
 
-// TODO use a pool
-func (g *Game) SpawnEnemy(kind EnemyKind, yOffset float64) bool {
+// SpawnEnemyNearShip spawns enemies of a given kind near a specific ship.
+// Enemy count and strength scale with the ship's points.
+func (g *Game) SpawnEnemyNearShip(kind EnemyKind, ship *Ship) bool {
 	r := float64(ShipR)
 	cfg, exists := enemyConfigs[kind]
 
 	if !exists {
-		panic("how?")
+		return false
 	}
 
 	if g.EnemyTypes[kind].R > 0 {
 		r = g.EnemyTypes[kind].R
 	}
 
-	count := cfg.CountBase + g.Level.LevelNum*cfg.CountPerLevel
+	// Calculate count based on ship's points
+	count := cfg.CountBase
+	if cfg.CountPerPoints > 0 {
+		count += ship.Points / cfg.CountPerPoints
+	}
 
-	var yStep float64
-	if cfg.UseYStep {
-		yStep = float64(HEIGHT) * -1.5 / float64(g.Level.LevelNum)
+	// Calculate health based on ship's points
+	health := cfg.HealthBase
+	if cfg.HealthPerPoints > 0 {
+		health += ship.Points / cfg.HealthPerPoints
 	}
 
 	for i := count; i > 0; i-- {
-		var y, yStop float64
+		// Spawn at random angle around the ship
+		spawnAngle := g.GameRNG.Random() * math.Pi * 2
 
-		if cfg.UseYStep {
-			yStop = cfg.YStopBase
-			if yOffset != 0 {
-				y = float64(i-1)*yStep + yOffset
-			} else {
-				y = float64(i-1)*yStep - r
-			}
-		} else {
-			yStop = cfg.YStopBase + g.GameRNG.Random()*cfg.YStopRange
-			if yOffset != 0 {
-				y = yStop + yOffset
-			} else {
-				y = -r
-			}
-		}
+		// Calculate spawn position at distance from ship
+		spawnX := ship.X + math.Cos(spawnAngle)*EnemySpawnDistance
+		spawnY := ship.Y + math.Sin(spawnAngle)*EnemySpawnDistance
 
-		// xPos
-		x := r + (float64(WIDTH)-r*2)*g.GameRNG.Random()
 		yOff := 0.0
 		if kind == Boss {
-			x = float64(WIDTH / 2)
-			yStop = r + 8
 			yOff = r * cfg.YOffsetMult
 		}
 
 		enemy := &Enemy{
 			Image:     g.EnemyTypes[kind].Image,
-			X:         x,
-			Y:         y,
-			YStop:     yStop,
+			X:         spawnX,
+			Y:         spawnY,
+			YStop:     0, // Not used in infinite world
 			YOffset:   yOff,
 			Radius:    r,
 			MaxAngle:  cfg.MaxAngle,
-			Health:    cfg.HealthBase + g.Level.LevelNum*cfg.HealthPerLevel,
+			Health:    health,
+			MaxHealth: health, // Store max health for health bar
 			FireTimer: cfg.TStart + g.GameRNG.RandomInt(cfg.TBase, cfg.TBase+cfg.TRange),
 			Kind:      kind,
 		}
@@ -362,4 +502,41 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// RenderHealthBar renders the enemy's health bar below the enemy sprite.
+// Similar to Ship.RenderEnergyBar, it fades out over time.
+func (e *Enemy) RenderHealthBar(g *Game, screenX, screenY float64) {
+	barWidth := e.Radius * 2
+	barX := int(screenX) - int(e.Radius)
+	barY := int(screenY) + int(e.Radius) + 4
+
+	// Calculate health percentage and color
+	healthPercent := float64(e.Health) / float64(e.MaxHealth)
+	if healthPercent < 0 {
+		healthPercent = 0
+	}
+	colorValue := int(healthPercent * 512)
+
+	g.Ctx.Set("globalAlpha", float64(e.OSD)/float64(ShipMaxOSD))
+	g.Ctx.Set("fillStyle", Theme.EnergyBarBackground)
+	g.Ctx.Call("fillRect", barX, barY, int(barWidth), 3)
+
+	var r, gr int
+	if colorValue > 255 {
+		r = 512 - colorValue
+		gr = 255
+	} else {
+		r = 255
+		gr = colorValue
+	}
+	g.Ctx.Set("fillStyle", "rgb("+strconv.Itoa(r)+","+strconv.Itoa(gr)+",0)")
+	g.Ctx.Call("fillRect", barX, barY, int(barWidth*healthPercent), 3)
+
+	g.Ctx.Set("lineWidth", Theme.EnergyBarLineWidth)
+	g.Ctx.Set("strokeStyle", Theme.EnergyBarBorder)
+	g.Ctx.Call("strokeRect", barX, barY, int(barWidth), 3)
+	g.Ctx.Set("globalAlpha", 1)
+
+	e.OSD--
 }

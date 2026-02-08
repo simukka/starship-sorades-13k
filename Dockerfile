@@ -17,7 +17,7 @@ COPY . .
 RUN go mod tidy
 
 # Run tests (allow failures, continue build)
-RUN gopherjs test ./game/... || true
+RUN gopherjs test ./game/...
 
 # Build with GopherJS (conditionally enable debug logging)
 RUN gopherjs build -o game.js .

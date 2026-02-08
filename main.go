@@ -23,13 +23,6 @@ func main() {
 	ctx := canvas.Call("getContext", "2d")
 
 	// Create the game instance
-	g := game.NewGame()
-	g.Canvas = canvas
-	g.Ctx = ctx
-
-	g.InitializeAudio()
-	g.SetupInputHandlers()
-	g.RenderTitleScreen()
-
+	game.NewGame(canvas, ctx)
 	select {}
 }

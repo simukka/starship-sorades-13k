@@ -26,22 +26,6 @@ func RenderToCanvas(width, height int, renderFn func(canvas, ctx *js.Object)) *j
 	return canvas
 }
 
-func (g *Game) InitializeAudio() {
-	// Initialize audio
-	sounds := g.Audio.Init()
-
-	// Load all sound effects using pure Go jsfxr implementation
-	for i, dataURL := range sounds {
-		g.Audio.LoadSound(i, dataURL)
-	}
-
-	// Initialize audio control panel (right-click to open)
-	g.Audio.InitControlPanel(g.Canvas)
-
-	// Initialize graphics (background, sprites, etc.)
-	g.InitializeGraphics()
-}
-
 // InitializeGraphics renders all static game graphics.
 func (g *Game) InitializeGraphics() {
 	// Score digit sprites (0-9)
@@ -231,7 +215,7 @@ func (g *Game) InitializeGraphics() {
 func (g *Game) InitializeEnemyGraphics() {
 	r := float64(ShipR)
 
-	// Enemy type 0 - small fighter
+	// Enemy type 0 - small fighter (1984-1998 Rainbow Apple era)
 	g.EnemyTypes[SmallFighter] = EnemyType{
 		R: r,
 		Image: RenderToCanvas(int(r*2), int(r*2), func(canvas, ctx *js.Object) {
@@ -240,8 +224,8 @@ func (g *Game) InitializeEnemyGraphics() {
 
 			ctx.Set("lineWidth", Theme.EnemyLineWidth)
 			ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
-			ctx.Set("strokeStyle", Theme.EnemyColor)
-			ctx.Set("shadowColor", Theme.EnemyGlow)
+			ctx.Set("strokeStyle", Theme.EnemySmallColor)
+			ctx.Set("shadowColor", Theme.EnemySmallGlow)
 			ctx.Set("miterLimit", 128)
 			ctx.Call("beginPath")
 
@@ -266,7 +250,7 @@ func (g *Game) InitializeEnemyGraphics() {
 		}),
 	}
 
-	// Enemy type 1 - medium fighter
+	// Enemy type 1 - medium fighter (1998-2001 Bondi Blue iMac era)
 	g.EnemyTypes[MediumFighter] = EnemyType{
 		R: r,
 		Image: RenderToCanvas(int(r*2), int(r*2), func(canvas, ctx *js.Object) {
@@ -275,8 +259,8 @@ func (g *Game) InitializeEnemyGraphics() {
 
 			ctx.Set("lineWidth", Theme.EnemyLineWidth)
 			ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
-			ctx.Set("strokeStyle", Theme.EnemyColor)
-			ctx.Set("shadowColor", Theme.EnemyGlow)
+			ctx.Set("strokeStyle", Theme.EnemyMediumColor)
+			ctx.Set("shadowColor", Theme.EnemyMediumGlow)
 
 			for i := 4; i >= 0; i-- {
 				fi := float64(i)
@@ -299,7 +283,7 @@ func (g *Game) InitializeEnemyGraphics() {
 		}),
 	}
 
-	// Enemy type 2 - turret
+	// Enemy type 2 - turret (2001-2007 iPod era - white/chrome)
 	g.EnemyTypes[TurretFighter] = EnemyType{
 		R: r,
 		Image: RenderToCanvas(int(r*2), int(r*2), func(canvas, ctx *js.Object) {
@@ -307,8 +291,8 @@ func (g *Game) InitializeEnemyGraphics() {
 
 			ctx.Set("lineWidth", Theme.EnemyLineWidth)
 			ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
-			ctx.Set("strokeStyle", Theme.EnemyColor)
-			ctx.Set("shadowColor", Theme.EnemyGlow)
+			ctx.Set("strokeStyle", Theme.EnemyTurretColor)
+			ctx.Set("shadowColor", Theme.EnemyTurretGlow)
 			ctx.Set("miterLimit", 32)
 			ctx.Call("beginPath")
 
@@ -350,7 +334,7 @@ func (g *Game) InitializeEnemyGraphics() {
 		}),
 	}
 
-	// Enemy type 3 - boss
+	// Enemy type 3 - boss (2013+ Modern era - Space Gray/Product RED)
 	bossR := float64(maxInt(WIDTH, HEIGHT) / 8)
 	g.EnemyTypes[Boss] = EnemyType{
 		R: bossR,
@@ -358,10 +342,10 @@ func (g *Game) InitializeEnemyGraphics() {
 			w := canvas.Get("width").Float()
 			h := canvas.Get("height").Float()
 
-			ctx.Set("lineWidth", Theme.EnemyLineWidth)
-			ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
-			ctx.Set("strokeStyle", Theme.EnemyColor)
-			ctx.Set("shadowColor", Theme.EnemyGlow)
+			ctx.Set("lineWidth", Theme.EnemyLineWidth*1.5)
+			ctx.Set("shadowBlur", Theme.DefaultShadowBlur*2)
+			ctx.Set("strokeStyle", Theme.EnemyBossColor)
+			ctx.Set("shadowColor", Theme.EnemyBossAccent)
 			ctx.Set("miterLimit", 32)
 			ctx.Call("beginPath")
 
