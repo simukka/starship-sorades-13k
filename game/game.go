@@ -57,6 +57,9 @@ type Game struct {
 
 	// Camera for infinite world
 	Camera *Camera
+
+	// Multiplayer
+	Network *NetworkManager
 }
 
 // NewGame creates a new game instance.
@@ -101,7 +104,6 @@ func NewGame(canvas, ctx *js.Object) *Game {
 	g.InitializeGraphics()
 
 	g.SetupInputHandlers()
-	g.RenderTitleScreen()
 
 	g.initBases()
 	g.Start()
@@ -282,69 +284,8 @@ func (g *Game) Start() {
 	if g.Audio.AudioCtx != nil && g.Audio.AudioCtx.Get("state").String() == "suspended" {
 		g.Audio.AudioCtx.Call("resume")
 	}
-}
 
-// GameOver handles game over state.
-func (g *Game) GameOver() {
-	// Stop music
-	g.Audio.StopMusic()
-	g.Audio.StopSynthMusic()
-
-	// Render title screen after delay
-	js.Global.Call("setTimeout", func() {
-		g.RenderTitleScreen()
-	}, 3000)
-}
-
-// RenderTitleScreen renders the title screen.
-func (g *Game) RenderTitleScreen() {
-	Debug("RenderTitleScreen")
-
-	// Clear screen
-	g.Ctx.Set("fillStyle", Theme.BackgroundColor)
-	g.Ctx.Call("fillRect", 0, 0, WIDTH, HEIGHT)
-
-	// Draw title text
-	// g.SpawnText("STARSHIP SORADES", 10)
-
-	// Draw instructions
-	g.Ctx.Set("fillStyle", Theme.TextSecondaryColor)
-	g.Ctx.Set("font", Theme.InstructFont)
-	g.Ctx.Set("textAlign", "center")
-	// g.Ctx.Call("fillText", "C", WIDTH/2, HEIGHT/2+50)
-	g.Ctx.Call("fillText", "LEFT/RIGHT TO ROTATE, UP/DOWN TO THRUST, X TO FIRE", WIDTH/2, HEIGHT/2+80)
-
-	// Play title music
-	g.Audio.PlayTitle()
-}
-
-// ResetGame resets all game state for a new game.
-func (g *Game) ResetGame() {
-	// Reset ships
-	g.Ships = g.Ships[:0]
-	g.initShipDefaults()
-
-	// Reset camera to follow ship
-	g.Camera.X = g.Ship.X
-	g.Camera.Y = g.Ship.Y
-
-	// Reset level (preserve Background, Points assets)
-	g.initLevelDefaults()
-
-	// Clear all pools
-	g.Bullets.Clear()
-	g.Explosions.Clear()
-	g.Bonuses.Clear()
-
-	// Clear enemies
-	g.Enemies = g.Enemies[:0]
-
-	// Reset bases
-	g.Bases = g.Bases[:0]
-	g.initBases()
-
-	// Reset game RNG
-	g.GameRNG.SetSeed(g.GameSeed)
+	g.JoinMultiplayer("vipps")
 }
 
 // RemoveEnemy removes an enemy using swap-and-pop.
@@ -400,10 +341,33 @@ func (g *Game) FindNearestEntity(x, y float64) Entity {
 	return nearest
 }
 
+// JoinMultiplayer joins a multiplayer room or creates one if it doesn't exist.
+// The first player to join becomes the host.
+func (g *Game) JoinMultiplayer(roomID string) {
+	if g.Network != nil {
+		g.Network.Disconnect()
+	}
+	g.Network = NewNetworkManager(g)
+	g.Network.JoinRoom(roomID)
+	g.Ship.NetworkID = g.Network.GetPlayerID()
+}
+
+// LeaveMultiplayer disconnects from the current multiplayer room.
+func (g *Game) LeaveMultiplayer() {
+	if g.Network != nil {
+		g.Network.Disconnect()
+		g.Network = nil
+	}
+}
+
 // ProcessInput handles player input.
 func (g *Game) ProcessInput() {
-	// Fire weapon (X key)
-	if g.Keys[88] {
+	// Determine if we're a network client (not host)
+	isNetworkClient := g.Network != nil && g.Network.IsConnected() && !g.Network.IsHost()
+
+	// Fire weapon (X key) - only on host or single player
+	// Clients send input to host, host handles firing
+	if g.Keys[88] && !isNetworkClient {
 		g.Ship.Fire(g)
 	}
 
@@ -424,30 +388,4 @@ func (g *Game) RenderBackground() {
 	g.Ctx.Set("fillStyle", g.Level.BackgroundPattern)
 	g.Ctx.Call("fillRect", -bgWidth, -bgWidth, WIDTH+bgWidth*2, HEIGHT+bgWidth*2)
 	g.Ctx.Call("restore")
-}
-
-// RenderScore renders the score display.
-func (g *Game) RenderScore() {
-	points := g.Level.P
-	scoreX := WIDTH - g.Level.Points.Width - 8
-	for points > 0 {
-		g.Ctx.Call("drawImage", g.Level.Points.Images[points%10], scoreX, 4)
-		points /= 10
-		scoreX -= g.Level.Points.Step
-	}
-}
-
-// RenderText renders the text display.
-func (g *Game) RenderText() {
-	if g.Level.Text.T > 0 {
-		if g.Level.Text.T < g.Level.Text.MaxT {
-			g.Ctx.Set("globalAlpha", float64(g.Level.Text.T)/float64(g.Level.Text.MaxT))
-		} else {
-			g.Ctx.Set("globalAlpha", 1)
-		}
-		g.Ctx.Call("drawImage", g.Level.Text.Image, g.Level.Text.X, g.Level.Text.Y)
-		g.Ctx.Set("globalAlpha", 1)
-		g.Level.Text.T--
-		g.Level.Text.Y += int(g.Level.Text.YAcc)
-	}
 }

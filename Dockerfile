@@ -22,15 +22,28 @@ RUN gopherjs test ./game/...
 # Build with GopherJS (conditionally enable debug logging)
 RUN gopherjs build -o game.js .
 
-# Production stage - serve static files
-FROM nginx:alpine
+# Build the server (with embedded index.html)
+RUN CGO_ENABLED=0 GOOS=linux go build -o starship-server ./server
 
-# Copy built game and static files
-COPY --from=builder /app/game.js /usr/share/nginx/html/
-COPY --from=builder /app/game.js.map /usr/share/nginx/html/
-COPY index.html /usr/share/nginx/html/
+# Production stage - minimal runtime with Go server
+FROM alpine:latest
 
-# Expose port 80
-EXPOSE 80
+# Add ca-certificates for HTTPS if needed
+RUN apk --no-cache add ca-certificates
 
-CMD ["nginx", "-g", "daemon off;"]
+WORKDIR /app
+
+# Copy built game files (game.js needed at runtime)
+COPY --from=builder /app/game.js .
+COPY --from=builder /app/game.js.map .
+
+# Copy the server binary (index.html is embedded)
+COPY --from=builder /app/starship-server .
+
+# Expose HTTP port and TURN port (UDP/TCP)
+EXPOSE 8080
+EXPOSE 3478/udp
+EXPOSE 3478/tcp
+
+# Run the server
+CMD ["./starship-server", "-port", "8080", "--turn-port", "3478", "-static", "/app"]

@@ -24,9 +24,10 @@ type Ship struct {
 	OriginalImage *js.Object
 	Weapons       []*Weapon
 	local         bool
-	Paused        bool //Ship is paused
-	InBase        bool // Ship is inside a base shield
-	RepairTimer   int  // Frames until next repair tick while in base
+	Paused        bool   //Ship is paused
+	InBase        bool   // Ship is inside a base shield
+	RepairTimer   int    // Frames until next repair tick while in base
+	NetworkID     string // Unique ID for multiplayer
 
 	// Targeting system
 	Target      *Enemy // Currently locked target

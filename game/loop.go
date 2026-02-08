@@ -26,7 +26,15 @@ func (g *Game) GameLoopRAF(currentTime float64) {
 
 // GameLoop is the core game logic.
 func (g *Game) GameLoop() {
-	// Player Input Processing
+	// Network update (send/receive)
+	if g.Network != nil {
+		g.Network.Update()
+	}
+
+	// Determine if we should run simulation (host) or just render (client)
+	isNetworkClient := g.Network != nil && g.Network.IsConnected() && !g.Network.IsHost()
+
+	// Player Input Processing (always process for local movement feel)
 	g.ProcessInput()
 
 	// Update targeting system
@@ -38,17 +46,16 @@ func (g *Game) GameLoop() {
 	// Background Rendering
 	g.RenderBackground()
 
-	// Score Display
-	g.RenderScore()
-
-	// Text Display
-	g.RenderText()
-
 	// Populate spatial grids for collision detection
 	g.PopulateSpatialGrids()
 
 	// Bullet Update and Rendering
-	g.UpdateBullets()
+	// Clients just render bullets received from host, host runs full simulation
+	if isNetworkClient {
+		g.RenderBullets()
+	} else {
+		g.UpdateBullets()
+	}
 
 	// Screen Flash Effect
 	if g.Level.Bomb > 0 {
@@ -67,17 +74,27 @@ func (g *Game) GameLoop() {
 	// Bonus Item Update
 	g.UpdateBonuses()
 
-	// Explosion Update
-	g.UpdateExplosions()
+	// Explosion Update - clients just render, host runs full simulation
+	if isNetworkClient {
+		g.RenderExplosions()
+	} else {
+		g.UpdateExplosions()
+	}
 
 	// Player Ship Rendering
 	g.RenderShip()
 
-	// Wave Spawning
-	g.CheckWaveSpawn()
+	// Wave Spawning (host only - clients receive enemy state from host)
+	if !isNetworkClient {
+		g.CheckWaveSpawn()
+	}
 
-	// Enemy Update
-	g.UpdateEnemies()
+	// Enemy Update - clients just render, host runs full simulation
+	if isNetworkClient {
+		g.RenderEnemies()
+	} else {
+		g.UpdateEnemies()
+	}
 
 	// Disable additive blending
 	g.Ctx.Set("globalCompositeOperation", "source-over")
@@ -105,6 +122,34 @@ func (g *Game) UpdateBullets() {
 		// Check bullet-vs-torpedo collision using spatial grid
 		if bullet.Kind == StandardBullet {
 			g.CheckBulletTorpedoCollision(bullet)
+		}
+	})
+
+	// Advance torpedo animation
+	g.TorpedoFrame = (g.TorpedoFrame + 1) % len(g.TorpedoImages)
+}
+
+// RenderBullets renders bullets without simulation (for network clients).
+func (g *Game) RenderBullets() {
+	g.Bullets.ForEachReverse(func(bullet *Bullet, bulletIdx int) {
+		var image *js.Object
+		var projectileR float64
+
+		if bullet.Kind == StandardBullet {
+			image = g.BulletImage
+			projectileR = BulletR
+		}
+		if bullet.Kind == TorpedoBullet {
+			image = g.TorpedoImages[g.TorpedoFrame]
+			projectileR = TorpedoR
+		}
+
+		// Convert world position to screen position
+		screenX, screenY := g.Camera.WorldToScreen(bullet.X, bullet.Y)
+
+		// Only render if on screen
+		if g.Camera.IsOnScreen(bullet.X, bullet.Y, projectileR) {
+			g.Ctx.Call("drawImage", image, screenX-projectileR, screenY-projectileR)
 		}
 	})
 
@@ -234,6 +279,25 @@ func (g *Game) UpdateExplosions() {
 	})
 }
 
+// RenderExplosions renders explosions without simulation (for network clients).
+func (g *Game) RenderExplosions() {
+	g.Explosions.ForEachReverse(func(exp *Explosion, idx int) {
+		// Convert to screen coordinates
+		screenX, screenY := g.Camera.WorldToScreen(exp.X, exp.Y)
+
+		// Only render if on screen
+		if g.Camera.IsOnScreen(exp.X, exp.Y, exp.Size) {
+			g.Ctx.Call("save")
+			g.Ctx.Set("globalAlpha", exp.Alpha)
+			g.Ctx.Call("translate", screenX, screenY)
+			g.Ctx.Call("rotate", exp.Angle)
+			g.Ctx.Call("drawImage", g.ExplosionImage,
+				-exp.Size/2, -exp.Size/2, exp.Size, exp.Size)
+			g.Ctx.Call("restore")
+		}
+	})
+}
+
 // RenderShip renders the player ship using the Entity interface.
 func (g *Game) RenderShip() {
 	for _, s := range g.Ships {
@@ -282,6 +346,35 @@ func (g *Game) UpdateEnemies() {
 		if !e.Update(g) {
 			// enemy no longer exists
 			g.RemoveEnemy(i)
+		}
+	}
+}
+
+// RenderEnemies renders enemies without simulation (for network clients).
+func (g *Game) RenderEnemies() {
+	for _, e := range g.Enemies {
+		// Just render, no AI/movement since that comes from host
+		enemyY := e.Y + e.YOffset
+
+		// Convert world position to screen position for rendering
+		screenX, screenY := g.Camera.WorldToScreen(e.X, enemyY)
+
+		// Only render if on screen
+		if !g.Camera.IsOnScreen(e.X, enemyY, e.Radius*2) {
+			continue
+		}
+
+		// Render enemy
+		g.Ctx.Call("save")
+		g.Ctx.Call("translate", screenX, screenY)
+		g.Ctx.Call("rotate", e.Angle)
+		g.Ctx.Call("drawImage", e.Image,
+			-e.Radius, -e.Radius, e.Radius*2, e.Radius*2)
+		g.Ctx.Call("restore")
+
+		// Render health bar if recently hit
+		if e.OSD > 0 {
+			e.RenderHealthBar(g, screenX, screenY)
 		}
 	}
 }

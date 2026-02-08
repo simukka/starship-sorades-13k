@@ -221,7 +221,7 @@ func NewStatsOverlay() *StatsOverlay {
 		PanelY:        16,
 		LineHeight:    18,
 		PanelWidth:    264,
-		PanelHeight:   280,
+		PanelHeight:   340,
 		LastFPSUpdate: 0,
 		CurrentFPS:    0,
 	}
@@ -312,20 +312,25 @@ func (s *StatsOverlay) Render(ctx *js.Object, g *Game) {
 	s.drawStatLine(ctx, "Enemies", strconv.Itoa(len(g.Enemies)), "#ff0066", y)
 	y += s.LineHeight
 
-	// Separator - Player
+	// Separator - Multiplayer
 	y += 5
 	ctx.Set("fillStyle", "#666666")
-	ctx.Call("fillText", "── Player ──", s.PanelX+10, y)
+	ctx.Call("fillText", "── Multiplayer ──", s.PanelX+10, y)
 	y += s.LineHeight
 
-	// Player stats
-	s.drawStatLine(ctx, "Health", strconv.Itoa(g.Ship.E)+"%", s.healthColor(g.Ship.E), y)
-	y += s.LineHeight
-	s.drawStatLine(ctx, "Weapons", strconv.Itoa(len(g.Ship.Weapons)), "#8888ff", y)
-	y += s.LineHeight
-	s.drawStatLine(ctx, "Shield", strconv.Itoa(g.Ship.Shield.T), "#00ffff", y)
-	y += s.LineHeight
-	s.drawStatLine(ctx, "Position", strconv.FormatFloat(g.Ship.X, 'f', 0, 64)+", "+strconv.FormatFloat(g.Ship.Y, 'f', 0, 64), "#aaaaaa", y)
+	// Multiplayer stats
+	if g.Network != nil && g.Network.IsConnected() {
+		playerCount := g.Network.GetPlayerCount()
+		s.drawStatLine(ctx, "Players", strconv.Itoa(playerCount)+"/20", "#00ff88", y)
+		y += s.LineHeight
+		if g.Network.IsHost() {
+			s.drawStatLine(ctx, "Role", "HOST", "#ffaa00", y)
+		} else {
+			s.drawStatLine(ctx, "Role", "CLIENT", "#88aaff", y)
+		}
+	} else {
+		s.drawStatLine(ctx, "Status", "OFFLINE", "#888888", y)
+	}
 }
 
 // drawStatLine draws a single stat line with label and value

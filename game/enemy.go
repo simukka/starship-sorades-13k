@@ -41,6 +41,7 @@ type Enemy struct {
 	FireDirection float64
 	TActive       int
 	TypeIndex     int
+	NetworkID     int // Unique ID for multiplayer synchronization
 
 	Target *Ship
 	Kind   EnemyKind
