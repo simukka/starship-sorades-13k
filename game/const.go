@@ -6,8 +6,8 @@ import (
 
 // Constants for game configuration
 const (
-	WIDTH         = 1024
-	HEIGHT        = 768
+	WIDTH         = 2048
+	HEIGHT        = 1080
 	Speed         = 2
 	MaxBomb       = 5
 	FrameDuration = 33.33 // ~30 FPS
@@ -22,14 +22,31 @@ const (
 	ShipMaxAngle    = 10
 	ShipMaxOSD      = 180 // 6 * 30
 	ShipMaxShield   = 300 // 10 * 30 frames
+
+	// ShipCollisionD is the vertical collision half-extent (depth along Y axis).
+	// Derived as 80% of ShipR for a tighter vertical hitbox.
+	ShipCollisionD = float64(ShipR) * 0.8
+
+	// ShipCollisionE is the horizontal collision half-extent (extent along X axis).
+	// Derived as 40% of ShipR for a narrower horizontal hitbox.
+	ShipCollisionE = float64(ShipR) * 0.4
 )
 
 // Projectile constants
 const (
-	BulletR    = 8
-	BulletMaxT = 35
-	TorpedoR   = 16
-	BonusR     = 16
+	BulletR                    = 8
+	BulletMaxT                 = 35
+	TorpedoR                   = 16
+	BonusR                     = 16
+	BulletTorpedoCollisionDist = 12.0
+)
+
+// Enemy constants
+const (
+	// EnemyAngleSmoothingFactor controls how quickly enemies rotate toward their target.
+	// Higher values = slower, smoother rotation. Lower values = faster, snappier rotation.
+	// The formula is: newAngle = (currentAngle * factor - targetAngle) / (factor + 1)
+	EnemyAngleSmoothingFactor = 1
 )
 
 // Shield holds shield state.
@@ -69,41 +86,4 @@ type Level struct {
 	Points            Points
 	Background        *js.Object
 	BackgroundPattern *js.Object
-}
-
-// Ship holds player ship state.
-type Ship struct {
-	X, Y          float64
-	XAcc, YAcc    float64
-	Angle         float64
-	E             int // Energy/health
-	Timeout       int
-	Weapon        int
-	Reload        int
-	OSD           int
-	Shield        Shield
-	Image         *js.Object
-	OriginalImage *js.Object
-}
-
-// Enemy represents an enemy entity.
-type Enemy struct {
-	Image         *js.Object
-	X, Y          float64
-	YStop         float64
-	YOffset       float64
-	R             float64
-	Angle         float64
-	MaxAngle      float64
-	E             int
-	T             int
-	FireDirection float64
-	TActive       int
-	TypeIndex     int
-}
-
-// EnemyType defines an enemy type's behavior and appearance.
-type EnemyType struct {
-	R     float64
-	Image *js.Object
 }

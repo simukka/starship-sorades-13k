@@ -1,28 +1,28 @@
 package game
 
 import (
-	"math"
-
 	"github.com/gopherjs/gopherjs/js"
+	"github.com/simukka/starship-sorades-13k/audio"
+	"github.com/simukka/starship-sorades-13k/common"
 )
 
 // Game holds the complete game state.
 type Game struct {
 	// Core state
 	Level    Level
-	Ship     Ship
+	Ships    []*Ship
+	Ship     *Ship
 	Enemies  []*Enemy
 	GameSeed uint32
-	GameRNG  *SeededRNG
+	GameRNG  *common.SeededRNG
 
 	// Object pools
 	Bullets    *BulletPool
-	Torpedos   *TorpedoPool
 	Explosions *ExplosionPool
 	Bonuses    *BonusPool
 
 	// Audio
-	Audio *AudioManager
+	Audio *audio.AudioManager
 
 	// Rendering
 	Canvas *js.Object
@@ -41,23 +41,34 @@ type Game struct {
 	TorpedoImages  []*js.Object
 	TorpedoFrame   int
 	BonusImages    map[string]*js.Object
-	EnemyTypes     []EnemyType
+	EnemyTypes     map[EnemyKind]EnemyType
+
+	// Debug UI
+	DebugUI      *DebugUI
+	StatsOverlay *StatsOverlay
+
+	// Collision detection
+	EnemyGrid  *SpatialGrid // Spatial hash for enemies
+	BulletGrid *SpatialGrid // Spatial hash for bullets/torpedos
 }
 
 // NewGame creates a new game instance.
 func NewGame() *Game {
-	Debug("new game")
+	seed := common.NewSeededRNG(0)
 	g := &Game{
-		Enemies:     make([]*Enemy, 0, 64),
-		GameRNG:     NewSeededRNG(0),
-		Bullets:     NewBulletPool(200),
-		Torpedos:    NewTorpedoPool(150),
-		Explosions:  NewExplosionPool(50),
-		Bonuses:     NewBonusPool(30),
-		Audio:       NewAudioManager(),
-		Keys:        make(map[int]bool),
-		BonusImages: make(map[string]*js.Object),
-		EnemyTypes:  make([]EnemyType, 4),
+		Enemies:      make([]*Enemy, 0, 64),
+		GameRNG:      seed,
+		Bullets:      NewBulletPool(350),
+		Explosions:   NewExplosionPool(50),
+		Bonuses:      NewBonusPool(30),
+		Audio:        audio.NewAudioManager(seed, HEIGHT),
+		Keys:         make(map[int]bool),
+		BonusImages:  make(map[string]*js.Object),
+		EnemyTypes:   make(map[EnemyKind]EnemyType, 4),
+		DebugUI:      NewDebugUI(),
+		StatsOverlay: NewStatsOverlay(),
+		EnemyGrid:    NewSpatialGrid(WIDTH, HEIGHT, 64),
+		BulletGrid:   NewSpatialGrid(WIDTH, HEIGHT, 64),
 	}
 	g.initLevelDefaults()
 	g.initShipDefaults()
@@ -66,7 +77,7 @@ func NewGame() *Game {
 
 // initShipDefaults initializes ship state to default values.
 func (g *Game) initShipDefaults() {
-	g.Ship = Ship{
+	g.Ships = append(g.Ships, &Ship{
 		X:       WIDTH / 2,
 		Y:       HEIGHT * 7 / 8,
 		E:       100,
@@ -80,7 +91,11 @@ func (g *Game) initShipDefaults() {
 		Shield: Shield{
 			MaxT: ShipMaxShield,
 		},
-	}
+		local: true,
+	})
+
+	g.Ship = g.Ships[0]
+	g.Ship.AddWeapon()
 }
 
 // initLevelDefaults initializes level state to default values.
@@ -102,54 +117,37 @@ func (g *Game) initLevelDefaults() {
 	}
 }
 
-// Hurt applies damage to the player ship.
-func (g *Game) Hurt(damage int) {
-	if g.Ship.Shield.T > 0 {
-		g.Audio.Play(2)
+// Hurt applies damage to a player's ship.
+func (g *Game) Hurt(damage int, ship *Ship) {
+	if ship.Shield.T > 0 {
+		g.Audio.PlayWithPan(2, ship.AudioPan(), 1.0)
 		return
 	}
 
-	if g.Ship.Timeout < 0 {
-		g.Ship.E -= damage
-		if g.Ship.E < 0 {
-			g.Ship.E = 0
+	if ship.Timeout < 0 {
+		ship.E -= damage
+		if ship.E < 0 {
+			ship.E = 0
 		}
-		g.Ship.Timeout = 10
+		ship.Timeout = 10
 	}
 
-	if g.Ship.E == 0 && !g.Level.Paused {
-		g.Explode(g.Ship.X, g.Ship.Y, 512)
-		g.Explode(g.Ship.X, g.Ship.Y, 1024)
+	if ship.E == 0 && !g.Level.Paused {
+		g.Explode(ship.X, ship.Y, 512)
+		g.Explode(ship.X, ship.Y, 1024)
 		g.Level.Paused = true
 		g.SpawnText("GAME OVER", -1)
-		g.Audio.Play(14)
-	} else if g.Ship.E < 25 {
-		g.Audio.Play(17)
+		g.Audio.PlayWithPan(14, ship.AudioPan(), 1.0)
+	} else if ship.E < 25 {
+		g.Audio.PlayWithPan(17, ship.AudioPan(), 1.0)
 	}
 
-	g.Audio.Play(1)
+	g.Audio.PlayWithPan(1, ship.AudioPan(), 1.0)
 
-	if g.Ship.Weapon > 2 {
-		g.Ship.Weapon--
+	if ship.Weapon > 2 {
+		ship.Weapon--
 	}
-	g.Ship.OSD = ShipMaxOSD
-}
-
-// Fire creates a bullet from the player's ship.
-func (g *Game) Fire(xVel, yVel float64) {
-	bullet := g.Bullets.Acquire()
-	if bullet == nil {
-		return
-	}
-
-	finalXVel := xVel + g.Ship.XAcc/2
-	finalYVel := yVel + g.Ship.YAcc/2
-
-	bullet.T = BulletMaxT
-	bullet.X = g.Ship.X + math.Floor(js.Global.Get("Math").Call("random").Float()*finalXVel)
-	bullet.Y = g.Ship.Y + math.Floor(js.Global.Get("Math").Call("random").Float()*finalYVel)
-	bullet.XAcc = finalXVel
-	bullet.YAcc = finalYVel
+	ship.OSD = ShipMaxOSD
 }
 
 // Explode creates an explosion effect.
@@ -217,47 +215,6 @@ func (g *Game) SpawnBonus(x, y, xAcc, yAcc float64, bonusType string) {
 	item.YAcc = yAcc/2 + Speed/2
 }
 
-// SpawnTorpedo spawns an enemy torpedo.
-func (g *Game) SpawnTorpedo(x, y, yOffset, angle, maxAngle float64) bool {
-	yPos := y + yOffset
-
-	if yPos < -HEIGHT/4 {
-		return false
-	}
-
-	if maxAngle > 0 {
-		if angle > math.Pi {
-			angle -= math.Pi * 2
-		}
-		if angle > maxAngle {
-			angle = maxAngle
-		}
-		if angle < -maxAngle {
-			angle = -maxAngle
-		}
-	}
-
-	torpedo := g.Torpedos.Acquire()
-	if torpedo == nil {
-		return false
-	}
-
-	speed := 3.0 + float64(g.Level.LevelNum)/2
-
-	torpedo.X = math.Floor(x)
-	torpedo.Y = yPos
-	if angle != 0 {
-		torpedo.XAcc = math.Sin(angle) * speed
-		torpedo.YAcc = math.Cos(angle) * speed
-	} else {
-		torpedo.XAcc = 0
-		torpedo.YAcc = speed
-	}
-	torpedo.E = 0
-
-	return true
-}
-
 // SpawnText displays a centered text message.
 func (g *Game) SpawnText(text string, duration int) {
 	g.RenderTextImage(text)
@@ -281,25 +238,6 @@ func (g *Game) spawnTextWithDuration(duration int) {
 		g.Level.Text.T = 0
 	} else {
 		g.Level.Text.T = duration
-	}
-}
-
-// SpawnEnemy spawns enemies of a specific type.
-func (g *Game) SpawnEnemy(typeIndex int, yOffset float64) {
-	if typeIndex < 0 || typeIndex >= len(g.EnemyTypes) {
-		typeIndex = g.GameRNG.RandomInt(0, len(g.EnemyTypes))
-	}
-
-	// Call the appropriate spawn function based on type
-	switch typeIndex {
-	case 0:
-		g.SpawnEnemyType0(yOffset)
-	case 1:
-		g.SpawnEnemyType1(yOffset)
-	case 2:
-		g.SpawnEnemyType2(yOffset)
-	case 3:
-		g.SpawnEnemyType3(yOffset)
 	}
 }
 
@@ -330,9 +268,9 @@ func (g *Game) Start() {
 		js.Global.Call("cancelAnimationFrame", g.AnimationFrameID)
 	}
 
-	// Fade out title and play music
+	// Fade out title and start synth music (seeded for deterministic music)
 	g.Audio.FadeOutTitle()
-	g.Audio.PlayMusic()
+	g.Audio.StartSynthMusic(g.GameSeed, g.Level.LevelNum+1) // Use level 1 preset at start
 
 	// Start game loop
 	g.AnimationFrameID = js.Global.Call("requestAnimationFrame", g.GameLoopRAF).Int()
@@ -344,6 +282,7 @@ func (g *Game) GameOver() {
 
 	// Stop music
 	g.Audio.StopMusic()
+	g.Audio.StopSynthMusic()
 
 	// Play game over sound
 	g.Audio.Play(14)
@@ -381,20 +320,13 @@ func (g *Game) RenderTitleScreen() {
 
 // ResetGame resets all game state for a new game.
 func (g *Game) ResetGame() {
-	// Reset ship (preserve Image assets)
-	shipImage := g.Ship.Image
-	shieldImage := g.Ship.Shield.Image
-
 	g.initShipDefaults()
-	g.Ship.Image = shipImage
-	g.Ship.Shield.Image = shieldImage
 
 	// Reset level (preserve Background, Points assets)
 	g.initLevelDefaults()
 
 	// Clear all pools
 	g.Bullets.Clear()
-	g.Torpedos.Clear()
 	g.Explosions.Clear()
 	g.Bonuses.Clear()
 
@@ -403,4 +335,13 @@ func (g *Game) ResetGame() {
 
 	// Reset game RNG
 	g.GameRNG.SetSeed(g.GameSeed)
+}
+
+// RemoveEnemy removes an enemy using swap-and-pop.
+func (g *Game) RemoveEnemy(index int) {
+	last := len(g.Enemies) - 1
+	if index != last {
+		g.Enemies[index] = g.Enemies[last]
+	}
+	g.Enemies = g.Enemies[:last]
 }

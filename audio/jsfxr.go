@@ -1,4 +1,4 @@
-package game
+package audio
 
 import (
 	"encoding/base64"
@@ -98,12 +98,12 @@ func (p *SfxrParams) ParseSettingsString(s string) {
 // SfxrSynth is the sound synthesizer engine.
 type SfxrSynth struct {
 	Params SfxrParams
-	
+
 	// Envelope lengths
 	envelopeLength0 float64
 	envelopeLength1 float64
 	envelopeLength2 float64
-	
+
 	// Oscillator state
 	period       float64
 	maxPeriod    float64
@@ -114,7 +114,7 @@ type SfxrSynth struct {
 	changeLimit  float64
 	squareDuty   float64
 	dutySweep    float64
-	
+
 	// Buffers
 	phaserBuffer []float64
 	noiseBuffer  []float64
@@ -131,21 +131,21 @@ func NewSfxrSynth() *SfxrSynth {
 // Reset resets oscillator state for partial reset (used for repeat effect).
 func (s *SfxrSynth) Reset() {
 	p := &s.Params
-	
+
 	// Calculate period from frequency
 	s.period = 100 / (p.StartFrequency*p.StartFrequency + 0.001)
 	s.maxPeriod = 100 / (p.MinFrequency*p.MinFrequency + 0.001)
-	
+
 	// Calculate slide as a multiplier
 	s.slide = 1 - p.Slide*p.Slide*p.Slide*0.01
 	s.deltaSlide = -p.DeltaSlide * p.DeltaSlide * p.DeltaSlide * 0.000001
-	
+
 	// Square wave duty cycle
 	if p.WaveType == 0 {
 		s.squareDuty = 0.5 - p.SquareDuty/2
 		s.dutySweep = -p.DutySweep * 0.00005
 	}
-	
+
 	// Pitch change calculation
 	if p.ChangeAmount > 0 {
 		s.changeAmount = 1 - p.ChangeAmount*p.ChangeAmount*0.9
@@ -164,19 +164,19 @@ func (s *SfxrSynth) Reset() {
 func (s *SfxrSynth) TotalReset() int {
 	s.Reset()
 	p := &s.Params
-	
+
 	// Calculate envelope lengths
 	s.envelopeLength0 = p.AttackTime * p.AttackTime * 100000
 	s.envelopeLength1 = p.SustainTime * p.SustainTime * 100000
 	s.envelopeLength2 = p.DecayTime*p.DecayTime*100000 + 10
-	
+
 	return int(s.envelopeLength0 + s.envelopeLength1 + s.envelopeLength2)
 }
 
 // SynthWave synthesizes audio samples into the provided buffer.
 func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 	p := &s.Params
-	
+
 	// Filter configuration
 	filtersEnabled := p.LpFilterCutoff != 1 || p.HpFilterCutoff != 0
 	hpFilterCutoff := p.HpFilterCutoff * p.HpFilterCutoff * 0.1
@@ -188,37 +188,37 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 	minFrequency := p.MinFrequency
 	phaserEnabled := p.PhaserOffset != 0 || p.PhaserSweep != 0
 	phaserDeltaOffset := p.PhaserSweep * p.PhaserSweep * p.PhaserSweep * 0.2
-	
+
 	phaserOffset := p.PhaserOffset * p.PhaserOffset
 	if p.PhaserOffset < 0 {
 		phaserOffset *= -1020
 	} else {
 		phaserOffset *= 1020
 	}
-	
+
 	var repeatLimit int
 	if p.RepeatSpeed != 0 {
 		repeatLimit = int((1-p.RepeatSpeed)*(1-p.RepeatSpeed)*20000) + 32
 	}
-	
+
 	sustainPunch := p.SustainPunch
 	vibratoAmplitude := p.VibratoDepth / 2
 	vibratoSpeed := p.VibratoSpeed * p.VibratoSpeed * 0.01
 	waveType := p.WaveType
-	
+
 	// Envelope state
 	envelopeLength := s.envelopeLength0
 	envelopeOverLength0 := 1 / s.envelopeLength0
 	envelopeOverLength1 := 1 / s.envelopeLength1
 	envelopeOverLength2 := 1 / s.envelopeLength2
-	
+
 	// Low-pass filter damping
 	lpFilterDamping := 5 / (1 + p.LpFilterResonance*p.LpFilterResonance*20) * (0.01 + lpFilterCutoff)
 	if lpFilterDamping > 0.8 {
 		lpFilterDamping = 0.8
 	}
 	lpFilterDamping = 1 - lpFilterDamping
-	
+
 	// Synthesis state
 	finished := false
 	envelopeStage := 0
@@ -236,7 +236,7 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 	sample := 0.0
 	superSample := 0.0
 	vibratoPhase := 0.0
-	
+
 	// Clear buffers
 	for i := range s.phaserBuffer {
 		s.phaserBuffer[i] = 0
@@ -244,7 +244,7 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 	for i := range s.noiseBuffer {
 		s.noiseBuffer[i] = pseudoRandom()*2 - 1
 	}
-	
+
 	// Cache state
 	period := s.period
 	maxPeriod := s.maxPeriod
@@ -255,15 +255,15 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 	changeLimit := s.changeLimit
 	squareDuty := s.squareDuty
 	dutySweep := s.dutySweep
-	
+
 	// Use deterministic random for reproducibility
 	randSeed := uint32(12345)
-	
+
 	for i := 0; i < length; i++ {
 		if finished {
 			return i
 		}
-		
+
 		// Handle repeat effect
 		if repeatLimit != 0 {
 			repeatTime++
@@ -281,7 +281,7 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 				dutySweep = s.dutySweep
 			}
 		}
-		
+
 		// Handle pitch change
 		if changeLimit != 0 {
 			changeTime++
@@ -290,11 +290,11 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 				period *= changeAmount
 			}
 		}
-		
+
 		// Apply frequency slide
 		slide += deltaSlide
 		period *= slide
-		
+
 		// Check for minimum frequency cutoff
 		if period > maxPeriod {
 			period = maxPeriod
@@ -302,22 +302,22 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 				finished = true
 			}
 		}
-		
+
 		periodTemp = period
-		
+
 		// Apply vibrato
 		if vibratoAmplitude > 0 {
 			vibratoPhase += vibratoSpeed
 			periodTemp *= 1 + math.Sin(vibratoPhase)*vibratoAmplitude
 		}
-		
+
 		// Clamp period to minimum
 		periodTempInt := int(periodTemp)
 		if periodTempInt < 8 {
 			periodTempInt = 8
 		}
 		periodTemp = float64(periodTempInt)
-		
+
 		// Square wave duty sweep
 		if waveType == 0 {
 			squareDuty += dutySweep
@@ -328,20 +328,20 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 				squareDuty = 0.5
 			}
 		}
-		
+
 		// Envelope stage progression
 		envelopeTime++
 		if envelopeTime > envelopeLength {
 			envelopeTime = 0
 			envelopeStage++
-			
+
 			if envelopeStage == 1 {
 				envelopeLength = s.envelopeLength1
 			} else if envelopeStage == 2 {
 				envelopeLength = s.envelopeLength2
 			}
 		}
-		
+
 		// Calculate envelope volume
 		switch envelopeStage {
 		case 0: // Attack
@@ -354,7 +354,7 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 			envelopeVolume = 0
 			finished = true
 		}
-		
+
 		// Update phaser offset
 		if phaserEnabled {
 			phaserOffset += phaserDeltaOffset
@@ -363,7 +363,7 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 				phaserInt = 1023
 			}
 		}
-		
+
 		// Update high-pass filter cutoff
 		if filtersEnabled && hpFilterDeltaCutoff != 1 {
 			hpFilterCutoff *= hpFilterDeltaCutoff
@@ -374,16 +374,16 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 				hpFilterCutoff = 0.1
 			}
 		}
-		
+
 		// 8x Oversampling loop
 		superSample = 0
-		
+
 		for j := 0; j < 8; j++ {
 			// Advance phase
 			phase++
 			if phase >= periodTemp {
 				phase = math.Mod(phase, periodTemp)
-				
+
 				// Generate new noise for noise wave type
 				if waveType == 3 {
 					for n := 0; n < 32; n++ {
@@ -392,7 +392,7 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 					}
 				}
 			}
-			
+
 			// Generate sample based on wave type
 			switch waveType {
 			case 0: // Square wave
@@ -424,7 +424,7 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 				idx := int(math.Abs(phase*32/periodTemp)) % 32
 				sample = s.noiseBuffer[idx]
 			}
-			
+
 			// Apply filters
 			if filtersEnabled {
 				lpFilterOldPos = lpFilterPos
@@ -435,7 +435,7 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 				if lpFilterCutoff > 0.1 {
 					lpFilterCutoff = 0.1
 				}
-				
+
 				if lpFilterOn {
 					lpFilterDeltaPos += (sample - lpFilterPos) * lpFilterCutoff
 					lpFilterDeltaPos *= lpFilterDamping
@@ -443,27 +443,27 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 					lpFilterPos = sample
 					lpFilterDeltaPos = 0
 				}
-				
+
 				lpFilterPos += lpFilterDeltaPos
-				
+
 				hpFilterPos += lpFilterPos - lpFilterOldPos
 				hpFilterPos *= 1 - hpFilterCutoff
 				sample = hpFilterPos
 			}
-			
+
 			// Apply phaser effect
 			if phaserEnabled {
 				s.phaserBuffer[phaserPos&1023] = sample
 				sample += s.phaserBuffer[(phaserPos-phaserInt+1024)&1023]
 				phaserPos++
 			}
-			
+
 			superSample += sample
 		}
-		
+
 		// Finalize sample
 		superSample *= 0.125 * envelopeVolume * masterVolume
-		
+
 		// Convert to 16-bit PCM with clipping
 		if superSample >= 1 {
 			buffer[i] = 32767
@@ -473,7 +473,7 @@ func (s *SfxrSynth) SynthWave(buffer []int16, length int) int {
 			buffer[i] = int16(superSample * 32767)
 		}
 	}
-	
+
 	return length
 }
 
@@ -493,15 +493,15 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 	if pan > 1 {
 		pan = 1
 	}
-	
+
 	// Calculate left/right gains using constant power panning
 	// This maintains perceived loudness across the stereo field
 	angle := (pan + 1) * math.Pi / 4 // 0 to π/2
 	leftGain := math.Cos(angle)
 	rightGain := math.Sin(angle)
-	
+
 	p := &s.Params
-	
+
 	// Filter configuration (same as SynthWave)
 	filtersEnabled := p.LpFilterCutoff != 1 || p.HpFilterCutoff != 0
 	hpFilterCutoff := p.HpFilterCutoff * p.HpFilterCutoff * 0.1
@@ -513,37 +513,37 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 	minFrequency := p.MinFrequency
 	phaserEnabled := p.PhaserOffset != 0 || p.PhaserSweep != 0
 	phaserDeltaOffset := p.PhaserSweep * p.PhaserSweep * p.PhaserSweep * 0.2
-	
+
 	phaserOffset := p.PhaserOffset * p.PhaserOffset
 	if p.PhaserOffset < 0 {
 		phaserOffset *= -1020
 	} else {
 		phaserOffset *= 1020
 	}
-	
+
 	var repeatLimit int
 	if p.RepeatSpeed != 0 {
 		repeatLimit = int((1-p.RepeatSpeed)*(1-p.RepeatSpeed)*20000) + 32
 	}
-	
+
 	sustainPunch := p.SustainPunch
 	vibratoAmplitude := p.VibratoDepth / 2
 	vibratoSpeed := p.VibratoSpeed * p.VibratoSpeed * 0.01
 	waveType := p.WaveType
-	
+
 	// Envelope state
 	envelopeLength := s.envelopeLength0
 	envelopeOverLength0 := 1 / s.envelopeLength0
 	envelopeOverLength1 := 1 / s.envelopeLength1
 	envelopeOverLength2 := 1 / s.envelopeLength2
-	
+
 	// Low-pass filter damping
 	lpFilterDamping := 5 / (1 + p.LpFilterResonance*p.LpFilterResonance*20) * (0.01 + lpFilterCutoff)
 	if lpFilterDamping > 0.8 {
 		lpFilterDamping = 0.8
 	}
 	lpFilterDamping = 1 - lpFilterDamping
-	
+
 	// Synthesis state
 	finished := false
 	envelopeStage := 0
@@ -561,7 +561,7 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 	sample := 0.0
 	superSample := 0.0
 	vibratoPhase := 0.0
-	
+
 	// Clear buffers
 	for i := range s.phaserBuffer {
 		s.phaserBuffer[i] = 0
@@ -569,7 +569,7 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 	for i := range s.noiseBuffer {
 		s.noiseBuffer[i] = pseudoRandom()*2 - 1
 	}
-	
+
 	// Cache state
 	period := s.period
 	maxPeriod := s.maxPeriod
@@ -580,14 +580,14 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 	changeLimit := s.changeLimit
 	squareDuty := s.squareDuty
 	dutySweep := s.dutySweep
-	
+
 	randSeed := uint32(12345)
-	
+
 	for i := 0; i < length; i++ {
 		if finished {
 			return i
 		}
-		
+
 		// Handle repeat effect
 		if repeatLimit != 0 {
 			repeatTime++
@@ -605,7 +605,7 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 				dutySweep = s.dutySweep
 			}
 		}
-		
+
 		// Handle pitch change
 		if changeLimit != 0 {
 			changeTime++
@@ -614,32 +614,32 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 				period *= changeAmount
 			}
 		}
-		
+
 		// Apply frequency slide
 		slide += deltaSlide
 		period *= slide
-		
+
 		if period > maxPeriod {
 			period = maxPeriod
 			if minFrequency > 0 {
 				finished = true
 			}
 		}
-		
+
 		periodTemp = period
-		
+
 		// Apply vibrato
 		if vibratoAmplitude > 0 {
 			vibratoPhase += vibratoSpeed
 			periodTemp *= 1 + math.Sin(vibratoPhase)*vibratoAmplitude
 		}
-		
+
 		periodTempInt := int(periodTemp)
 		if periodTempInt < 8 {
 			periodTempInt = 8
 		}
 		periodTemp = float64(periodTempInt)
-		
+
 		// Square wave duty sweep
 		if waveType == 0 {
 			squareDuty += dutySweep
@@ -650,20 +650,20 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 				squareDuty = 0.5
 			}
 		}
-		
+
 		// Envelope stage progression
 		envelopeTime++
 		if envelopeTime > envelopeLength {
 			envelopeTime = 0
 			envelopeStage++
-			
+
 			if envelopeStage == 1 {
 				envelopeLength = s.envelopeLength1
 			} else if envelopeStage == 2 {
 				envelopeLength = s.envelopeLength2
 			}
 		}
-		
+
 		// Calculate envelope volume
 		switch envelopeStage {
 		case 0:
@@ -676,7 +676,7 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 			envelopeVolume = 0
 			finished = true
 		}
-		
+
 		// Update phaser offset
 		if phaserEnabled {
 			phaserOffset += phaserDeltaOffset
@@ -685,7 +685,7 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 				phaserInt = 1023
 			}
 		}
-		
+
 		// Update high-pass filter cutoff
 		if filtersEnabled && hpFilterDeltaCutoff != 1 {
 			hpFilterCutoff *= hpFilterDeltaCutoff
@@ -696,15 +696,15 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 				hpFilterCutoff = 0.1
 			}
 		}
-		
+
 		// 8x Oversampling loop
 		superSample = 0
-		
+
 		for j := 0; j < 8; j++ {
 			phase++
 			if phase >= periodTemp {
 				phase = math.Mod(phase, periodTemp)
-				
+
 				if waveType == 3 {
 					for n := 0; n < 32; n++ {
 						randSeed = randSeed*1103515245 + 12345
@@ -712,7 +712,7 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 					}
 				}
 			}
-			
+
 			switch waveType {
 			case 0:
 				if phase/periodTemp < squareDuty {
@@ -743,7 +743,7 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 				idx := int(math.Abs(phase*32/periodTemp)) % 32
 				sample = s.noiseBuffer[idx]
 			}
-			
+
 			if filtersEnabled {
 				lpFilterOldPos = lpFilterPos
 				lpFilterCutoff *= lpFilterDeltaCutoff
@@ -753,7 +753,7 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 				if lpFilterCutoff > 0.1 {
 					lpFilterCutoff = 0.1
 				}
-				
+
 				if lpFilterOn {
 					lpFilterDeltaPos += (sample - lpFilterPos) * lpFilterCutoff
 					lpFilterDeltaPos *= lpFilterDamping
@@ -761,30 +761,30 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 					lpFilterPos = sample
 					lpFilterDeltaPos = 0
 				}
-				
+
 				lpFilterPos += lpFilterDeltaPos
-				
+
 				hpFilterPos += lpFilterPos - lpFilterOldPos
 				hpFilterPos *= 1 - hpFilterCutoff
 				sample = hpFilterPos
 			}
-			
+
 			if phaserEnabled {
 				s.phaserBuffer[phaserPos&1023] = sample
 				sample += s.phaserBuffer[(phaserPos-phaserInt+1024)&1023]
 				phaserPos++
 			}
-			
+
 			superSample += sample
 		}
-		
+
 		// Finalize sample
 		superSample *= 0.125 * envelopeVolume * masterVolume
-		
+
 		// Apply panning and convert to 16-bit PCM
 		leftSample := superSample * leftGain
 		rightSample := superSample * rightGain
-		
+
 		if leftSample >= 1 {
 			bufferL[i] = 32767
 		} else if leftSample <= -1 {
@@ -792,7 +792,7 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 		} else {
 			bufferL[i] = int16(leftSample * 32767)
 		}
-		
+
 		if rightSample >= 1 {
 			bufferR[i] = 32767
 		} else if rightSample <= -1 {
@@ -801,7 +801,7 @@ func (s *SfxrSynth) SynthWaveStereo(bufferL, bufferR []int16, length int, pan fl
 			bufferR[i] = int16(rightSample * 32767)
 		}
 	}
-	
+
 	return length
 }
 
@@ -822,35 +822,35 @@ func ResetPRNG(seed uint32) {
 func GenerateWavDataURL(settings string) string {
 	synth := NewSfxrSynth()
 	synth.Params.ParseSettingsString(settings)
-	
+
 	envelopeFullLength := synth.TotalReset()
-	
+
 	// Calculate buffer size
 	sampleCount := (envelopeFullLength + 1) / 2
 	dataSize := sampleCount*4 + 44
-	
+
 	// Allocate buffer
 	data := make([]byte, dataSize)
-	
+
 	// Generate audio samples
 	samples := make([]int16, envelopeFullLength)
 	samplesWritten := synth.SynthWave(samples, envelopeFullLength)
 	bytesUsed := samplesWritten * 2
-	
+
 	// Write WAV header
 	writeWavHeader(data, bytesUsed)
-	
+
 	// Write sample data (little-endian)
 	for i := 0; i < samplesWritten; i++ {
 		data[44+i*2] = byte(samples[i])
 		data[44+i*2+1] = byte(samples[i] >> 8)
 	}
-	
+
 	totalBytes := bytesUsed + 44
-	
+
 	// Base64 encode
 	encoded := base64.StdEncoding.EncodeToString(data[:totalBytes])
-	
+
 	return "data:audio/wav;base64," + encoded
 }
 
@@ -866,20 +866,20 @@ func writeWavHeader(data []byte, dataSize int) {
 	data[9] = 'A'
 	data[10] = 'V'
 	data[11] = 'E'
-	
+
 	// fmt sub-chunk
 	data[12] = 'f'
 	data[13] = 'm'
 	data[14] = 't'
 	data[15] = ' '
-	writeUint32LE(data, 16, 16)         // Sub-chunk size
-	writeUint16LE(data, 20, 1)          // Audio format (PCM)
-	writeUint16LE(data, 22, 1)          // Channels (mono)
-	writeUint32LE(data, 24, 44100)      // Sample rate
-	writeUint32LE(data, 28, 88200)      // Byte rate
-	writeUint16LE(data, 32, 2)          // Block align
-	writeUint16LE(data, 34, 16)         // Bits per sample
-	
+	writeUint32LE(data, 16, 16)    // Sub-chunk size
+	writeUint16LE(data, 20, 1)     // Audio format (PCM)
+	writeUint16LE(data, 22, 1)     // Channels (mono)
+	writeUint32LE(data, 24, 44100) // Sample rate
+	writeUint32LE(data, 28, 88200) // Byte rate
+	writeUint16LE(data, 32, 2)     // Block align
+	writeUint16LE(data, 34, 16)    // Bits per sample
+
 	// data sub-chunk
 	data[36] = 'd'
 	data[37] = 'a'
@@ -904,19 +904,19 @@ func writeUint32LE(data []byte, offset int, value uint32) {
 func GenerateFloat32Buffer(settings string) []float32 {
 	synth := NewSfxrSynth()
 	synth.Params.ParseSettingsString(settings)
-	
+
 	length := synth.TotalReset()
-	
+
 	// Generate samples
 	tempBuffer := make([]int16, length)
 	samplesWritten := synth.SynthWave(tempBuffer, length)
-	
+
 	// Convert to float32
 	result := make([]float32, samplesWritten)
 	for i := 0; i < samplesWritten; i++ {
 		result[i] = float32(tempBuffer[i]) / 32768
 	}
-	
+
 	return result
 }
 
@@ -925,24 +925,24 @@ func GenerateFloat32Buffer(settings string) []float32 {
 func GenerateStereoWavDataURL(settings string, pan float64) string {
 	synth := NewSfxrSynth()
 	synth.Params.ParseSettingsString(settings)
-	
+
 	envelopeFullLength := synth.TotalReset()
-	
+
 	// Calculate buffer size for stereo (2 channels)
 	sampleCount := (envelopeFullLength + 1) / 2
-	dataSize := sampleCount * 8 + 44 // 4 bytes per stereo sample pair
-	
+	dataSize := sampleCount*8 + 44 // 4 bytes per stereo sample pair
+
 	data := make([]byte, dataSize)
-	
+
 	// Generate stereo audio samples
 	samplesL := make([]int16, envelopeFullLength)
 	samplesR := make([]int16, envelopeFullLength)
 	samplesWritten := synth.SynthWaveStereo(samplesL, samplesR, envelopeFullLength, pan)
 	bytesUsed := samplesWritten * 4 // 2 bytes per channel * 2 channels
-	
+
 	// Write stereo WAV header
 	writeStereoWavHeader(data, bytesUsed)
-	
+
 	// Write interleaved stereo sample data (L, R, L, R, ...)
 	for i := 0; i < samplesWritten; i++ {
 		offset := 44 + i*4
@@ -951,10 +951,10 @@ func GenerateStereoWavDataURL(settings string, pan float64) string {
 		data[offset+2] = byte(samplesR[i])
 		data[offset+3] = byte(samplesR[i] >> 8)
 	}
-	
+
 	totalBytes := bytesUsed + 44
 	encoded := base64.StdEncoding.EncodeToString(data[:totalBytes])
-	
+
 	return "data:audio/wav;base64," + encoded
 }
 
@@ -970,20 +970,20 @@ func writeStereoWavHeader(data []byte, dataSize int) {
 	data[9] = 'A'
 	data[10] = 'V'
 	data[11] = 'E'
-	
+
 	// fmt sub-chunk
 	data[12] = 'f'
 	data[13] = 'm'
 	data[14] = 't'
 	data[15] = ' '
-	writeUint32LE(data, 16, 16)          // Sub-chunk size
-	writeUint16LE(data, 20, 1)           // Audio format (PCM)
-	writeUint16LE(data, 22, 2)           // Channels (stereo)
-	writeUint32LE(data, 24, 44100)       // Sample rate
-	writeUint32LE(data, 28, 176400)      // Byte rate (44100 * 2 channels * 2 bytes)
-	writeUint16LE(data, 32, 4)           // Block align (2 channels * 2 bytes)
-	writeUint16LE(data, 34, 16)          // Bits per sample
-	
+	writeUint32LE(data, 16, 16)     // Sub-chunk size
+	writeUint16LE(data, 20, 1)      // Audio format (PCM)
+	writeUint16LE(data, 22, 2)      // Channels (stereo)
+	writeUint32LE(data, 24, 44100)  // Sample rate
+	writeUint32LE(data, 28, 176400) // Byte rate (44100 * 2 channels * 2 bytes)
+	writeUint16LE(data, 32, 4)      // Block align (2 channels * 2 bytes)
+	writeUint16LE(data, 34, 16)     // Bits per sample
+
 	// data sub-chunk
 	data[36] = 'd'
 	data[37] = 'a'
@@ -997,14 +997,14 @@ func writeStereoWavHeader(data []byte, dataSize int) {
 func GenerateStereoFloat32Buffer(settings string, pan float64) ([]float32, []float32) {
 	synth := NewSfxrSynth()
 	synth.Params.ParseSettingsString(settings)
-	
+
 	length := synth.TotalReset()
-	
+
 	// Generate stereo samples
 	tempL := make([]int16, length)
 	tempR := make([]int16, length)
 	samplesWritten := synth.SynthWaveStereo(tempL, tempR, length, pan)
-	
+
 	// Convert to float32
 	resultL := make([]float32, samplesWritten)
 	resultR := make([]float32, samplesWritten)
@@ -1012,6 +1012,6 @@ func GenerateStereoFloat32Buffer(settings string, pan float64) ([]float32, []flo
 		resultL[i] = float32(tempL[i]) / 32768
 		resultR[i] = float32(tempR[i]) / 32768
 	}
-	
+
 	return resultL, resultR
 }

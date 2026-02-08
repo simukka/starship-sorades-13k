@@ -1,6 +1,4 @@
-// Package game implements the Starship Sorades 13K game engine.
-// This file contains the seeded pseudo-random number generator.
-package game
+package common
 
 // SeededRNG implements a Mulberry32 seeded pseudo-random number generator.
 // Produces deterministic sequences for reproducible gameplay.

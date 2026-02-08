@@ -5,12 +5,16 @@ import (
 	"strconv"
 
 	"github.com/gopherjs/gopherjs/js"
+	"github.com/simukka/starship-sorades-13k/common"
 )
 
 // GameLoopRAF is the main game loop using requestAnimationFrame.
 func (g *Game) GameLoopRAF(currentTime float64) {
 	// Schedule next frame
 	g.AnimationFrameID = js.Global.Call("requestAnimationFrame", g.GameLoopRAF).Int()
+
+	// Update FPS counter
+	g.StatsOverlay.UpdateFPS(currentTime)
 
 	// Fixed timestep
 	if currentTime-g.LastFrameTime < FrameDuration {
@@ -29,10 +33,8 @@ func (g *Game) GameLoopRAF(currentTime float64) {
 
 // GameLoop is the core game logic.
 func (g *Game) GameLoop() {
-	Debug("=== Game Loop Start ===")
-	Debug("Ship pos:", g.Ship.X, g.Ship.Y, "Energy:", g.Ship.E, "Weapon:", g.Ship.Weapon)
 	Debug("Level:", g.Level.LevelNum, "Score:", g.Level.P, "Enemies:", len(g.Enemies))
-	Debug("Bullets:", g.Bullets.ActiveCount, "Torpedos:", g.Torpedos.ActiveCount, "Explosions:", g.Explosions.ActiveCount)
+	Debug("Bullets:", g.Bullets.ActiveCount, "Explosions:", g.Explosions.ActiveCount)
 
 	// Player Input Processing
 	g.ProcessInput()
@@ -45,6 +47,9 @@ func (g *Game) GameLoop() {
 
 	// Text Display
 	g.RenderText()
+
+	// Populate spatial grids for collision detection
+	g.PopulateSpatialGrids()
 
 	// Bullet Update and Rendering
 	g.UpdateBullets()
@@ -63,9 +68,6 @@ func (g *Game) GameLoop() {
 	// Bonus Item Update
 	g.UpdateBonuses()
 
-	// Torpedo Update
-	g.UpdateTorpedos()
-
 	// Explosion Update
 	g.UpdateExplosions()
 
@@ -81,96 +83,32 @@ func (g *Game) GameLoop() {
 	// Disable additive blending
 	g.Ctx.Set("globalCompositeOperation", "source-over")
 
-	// Energy Bar HUD
-	g.RenderEnergyBar()
+	// Debug UI (rendered last, on top of everything)
+	g.DebugUI.Render(g.Ctx)
+
+	// Stats overlay
+	g.StatsOverlay.Render(g.Ctx, g)
 }
 
 // ProcessInput handles player input.
 func (g *Game) ProcessInput() {
-	// Fire weapon
-	g.Ship.Reload--
-	if g.Ship.Reload <= 0 && g.Keys[88] {
-		if g.Ship.Weapon > 0 {
-			g.Ship.Reload = 4
-		} else {
-			g.Ship.Reload = 6
-		}
-		g.Fire(0, -16)
-
-		if g.Ship.Weapon > 1 {
-			g.Fire(-8, -8)
-			g.Fire(8, -8)
-
-			if g.Ship.Weapon > 2 {
-				g.Fire(0, 16)
-
-				if g.Ship.Weapon > 3 {
-					g.Fire(-16, 0)
-					g.Fire(16, 0)
-				}
-			}
-		}
-
-		if g.Ship.Weapon > 2 {
-			g.Audio.Play(16)
-		} else if g.Ship.Weapon > 0 {
-			g.Audio.Play(0)
-		} else {
-			g.Audio.Play(15)
-		}
+	// Fire weapon (X key)
+	if g.Keys[88] {
+		g.Ship.Fire(g)
 	}
 
-	// Movement input with visual tilt
-	g.Ship.Angle *= ShipAngleFactor
-
-	// Left arrow
-	if g.Keys[37] {
-		if g.Ship.X >= WIDTH && g.Ship.XAcc > 0 {
-			g.Ship.XAcc = 0
-		}
-		g.Ship.XAcc -= ShipACC
-		g.Ship.Angle = (g.Ship.Angle+1)*ShipAngleFactor - 1
-	}
-	// Up arrow
-	if g.Keys[38] {
-		if g.Ship.Y >= HEIGHT && g.Ship.YAcc > 0 {
-			g.Ship.YAcc = 0
-		}
-		g.Ship.YAcc -= ShipACC
-	}
-	// Right arrow
-	if g.Keys[39] {
-		if g.Ship.X < 0 && g.Ship.XAcc < 0 {
-			g.Ship.XAcc = 0
-		}
-		g.Ship.XAcc += ShipACC
-		g.Ship.Angle = (g.Ship.Angle-1)*ShipAngleFactor + 1
-	}
-	// Down arrow
-	if g.Keys[40] {
-		if g.Ship.Y < 0 && g.Ship.YAcc < 0 {
-			g.Ship.YAcc = 0
-		}
-		g.Ship.YAcc += ShipACC
+	// Ship movement disabled when debug UI is visible (F9)
+	// This allows fine-tuning enemy configs without being hit
+	if g.DebugUI.Visible {
+		return
 	}
 
-	// Screen boundary collision
-	if g.Ship.X < 0 && g.Ship.XAcc < 0 {
-		g.Ship.X = 0
-	} else if g.Ship.X >= WIDTH && g.Ship.XAcc > 0 {
-		g.Ship.X = WIDTH - 1
-	}
-	if g.Ship.Y < 0 && g.Ship.YAcc < 0 {
-		g.Ship.Y = 0
-	} else if g.Ship.Y >= HEIGHT && g.Ship.YAcc > 0 {
-		g.Ship.Y = HEIGHT - 1
-	}
+	g.Ship.Move(g, g.Keys)
+}
 
-	// Apply velocity and damping
-	g.Ship.X += g.Ship.XAcc
-	g.Ship.Y += g.Ship.YAcc
-	g.Ship.XAcc *= ShipACCFactor
-	g.Ship.YAcc *= ShipACCFactor
+// ProcessDebugInput handles input for the debug UI
+func (g *Game) ProcessDebugInput() {
+	// Input is handled in keydown events in input.go
 }
 
 // RenderBackground renders the scrolling background.
@@ -212,96 +150,92 @@ func (g *Game) RenderText() {
 
 // UpdateBullets updates and renders bullets.
 func (g *Game) UpdateBullets() {
-	bulletTorpedoCollisionDist := 12.0
-
 	g.Bullets.ForEachReverse(func(bullet *Bullet, bulletIdx int) {
-		// Render bullet
-		g.Ctx.Call("drawImage", g.BulletImage,
-			int(bullet.X)-BulletR, int(bullet.Y)-BulletR)
-
-		// Update position
-		bullet.X += bullet.XAcc
-		bullet.Y += bullet.YAcc
-
-		// Check collision with torpedoes
-		g.Torpedos.ForEachReverse(func(torpedo *Torpedo, torpedoIdx int) {
-			if bullet.Y < torpedo.Y+bulletTorpedoCollisionDist &&
-				bullet.Y > torpedo.Y-bulletTorpedoCollisionDist &&
-				bullet.X < torpedo.X+bulletTorpedoCollisionDist &&
-				bullet.X > torpedo.X-bulletTorpedoCollisionDist {
-
-				torpedo.E--
-				if torpedo.E < 0 {
-					g.Level.P += 5
-					if g.GameRNG.Random() > 0.75 {
-						g.SpawnBonus(torpedo.X, torpedo.Y, 0, 0, "")
-					}
-					g.Explode(torpedo.X, torpedo.Y, 0)
-					g.Torpedos.Release(torpedoIdx)
-					g.Audio.Play(11)
-				}
-				bullet.T = 0
-			}
-		})
-
-		// Remove expired or off-screen bullets
-		bullet.T--
-		if bullet.T < 0 || bullet.X < -BulletR ||
-			bullet.X >= WIDTH+BulletR || bullet.Y >= HEIGHT+BulletR {
+		// Within the render the projectile checks for collisions
+		// with other ships
+		if !bullet.Render(g) {
 			g.Bullets.Release(bulletIdx)
+			return
+		}
+
+		// Check bullet-vs-torpedo collision using spatial grid
+		if bullet.Kind == StandardBullet {
+			g.CheckBulletTorpedoCollision(bullet)
 		}
 	})
+
+	// Advance torpedo animation
+	g.TorpedoFrame = (g.TorpedoFrame + 1) % len(g.TorpedoImages)
+}
+
+// PopulateSpatialGrids clears and repopulates the spatial hash grids.
+// Called once per frame before collision detection.
+func (g *Game) PopulateSpatialGrids() {
+	// Clear grids from previous frame
+	g.EnemyGrid.Clear()
+	g.BulletGrid.Clear()
+
+	// Insert all enemies
+	for _, enemy := range g.Enemies {
+		g.EnemyGrid.Insert(enemy)
+	}
+
+	// Insert all active bullets/torpedos
+	for i := 0; i < g.Bullets.ActiveCount; i++ {
+		g.BulletGrid.Insert(g.Bullets.Pool[i])
+	}
+}
+
+// CheckBulletTorpedoCollision checks if a standard bullet hits any nearby torpedos.
+func (g *Game) CheckBulletTorpedoCollision(bullet *Bullet) {
+	// Get nearby objects from the spatial grid
+	nearby := g.BulletGrid.GetNearby(bullet.X, bullet.Y)
+
+	for _, obj := range nearby {
+		torpedo, ok := obj.(*Bullet)
+		if !ok || torpedo.Kind != TorpedoBullet {
+			continue
+		}
+
+		// AABB collision check
+		if bullet.Y < torpedo.Y+BulletTorpedoCollisionDist &&
+			bullet.Y > torpedo.Y-BulletTorpedoCollisionDist &&
+			bullet.X < torpedo.X+BulletTorpedoCollisionDist &&
+			bullet.X > torpedo.X-BulletTorpedoCollisionDist {
+
+			torpedo.E--
+			g.Level.P += 5
+
+			if torpedo.E < 0 {
+				// Torpedo destroyed
+				if g.GameRNG.Random() > 0.75 {
+					g.SpawnBonus(torpedo.X, torpedo.Y, 0, 0, "")
+				}
+				g.Explode(torpedo.X, torpedo.Y, 0)
+				vol := torpedo.DistanceVolume(g.Ship.X, g.Ship.Y, float64(HEIGHT))
+				g.Audio.PlayWithPan(11, torpedo.AudioPan(), vol)
+				torpedo.T = -1 // Mark for removal
+			}
+
+			bullet.T = 0 // Consume the bullet
+			return
+		}
+	}
 }
 
 // UpdateBonuses updates and renders bonus items.
 func (g *Game) UpdateBonuses() {
-	shipCollisionD := float64(ShipR) * 0.8
-	shipCollisionE := float64(ShipR) * 0.4
-
 	g.Bonuses.ForEachReverse(func(item *Bonus, idx int) {
-		// Check collision with player
-		if g.Ship.Y < item.Y+shipCollisionD && g.Ship.Y > item.Y-shipCollisionD &&
-			g.Ship.X < item.X+shipCollisionE && g.Ship.X > item.X-shipCollisionE {
+		claimed := false
 
-			g.Level.P += 10
-
-			switch item.Type {
-			case "+":
-				if g.Ship.Weapon < 4 {
-					g.Ship.Weapon++
-					g.Audio.Play(5)
-				} else {
-					g.Audio.Play(6)
-				}
-			case "E":
-				if g.Ship.E < 100 {
-					g.Ship.OSD = ShipMaxOSD
-					g.Audio.Play(5)
-				} else {
-					g.Audio.Play(6)
-				}
-				g.Ship.E += 5
-				if g.Ship.E > 100 {
-					g.Ship.E = 100
-				}
-			case "S":
-				g.Ship.Shield.T += g.Ship.Shield.MaxT * g.Ship.Shield.MaxT *
-					2 / (g.Ship.Shield.T + g.Ship.Shield.MaxT*2)
-				g.Audio.Play(3)
-			case "B":
-				for j := len(g.Enemies) - 1; j >= 0; j-- {
-					g.Enemies[j].E--
-				}
-				for j := 0; j < min(g.Torpedos.ActiveCount, 5); j++ {
-					g.Explode(g.Torpedos.Pool[j].X, g.Torpedos.Pool[j].Y, 0)
-				}
-				g.Torpedos.Clear()
-				g.Level.Bomb = MaxBomb
-				g.Audio.Play(13)
-			default:
-				g.Audio.Play(7)
+		for _, s := range g.Ships {
+			if s.Pickup(g, item) && !claimed {
+				claimed = true
+				break
 			}
+		}
 
+		if claimed {
 			g.Bonuses.Release(idx)
 			return
 		}
@@ -323,39 +257,40 @@ func (g *Game) UpdateBonuses() {
 }
 
 // UpdateTorpedos updates and renders torpedoes.
-func (g *Game) UpdateTorpedos() {
-	shipCollisionD := float64(ShipR) * 0.8
-	shipCollisionE := float64(ShipR) * 0.4
+// func (g *Game) UpdateTorpedos() {
+// 	g.Torpedos.ForEachReverse(func(torpedo *Torpedo, idx int) {
+// 		// Check collision with player
+// 		collision := false
+// 		for _, s := range g.Ships {
+// 			if s.Collision(g, torpedo) && !collision {
+// 				collision = true
+// 				break
+// 			}
+// 		}
 
-	g.Torpedos.ForEachReverse(func(torpedo *Torpedo, idx int) {
-		// Check collision with player
-		if g.Ship.Y < torpedo.Y+shipCollisionD && g.Ship.Y > torpedo.Y-shipCollisionD &&
-			g.Ship.X < torpedo.X+shipCollisionE && g.Ship.X > torpedo.X-shipCollisionE {
-			g.Hurt(10)
-			g.Explode(torpedo.X, torpedo.Y, 0)
-			g.Torpedos.Release(idx)
-			return
-		}
+// 		if collision {
+// 			g.Torpedos.Release(idx)
+// 			return
+// 		}
 
-		// Render torpedo with animation
-		g.Ctx.Call("drawImage", g.TorpedoImages[g.TorpedoFrame],
-			int(torpedo.X)-TorpedoR, int(torpedo.Y)-TorpedoR)
+// 		// Render torpedo with animation
+// 		g.Ctx.Call("drawImage", g.TorpedoImages[g.TorpedoFrame],
+// 			int(torpedo.X)-TorpedoR, int(torpedo.Y)-TorpedoR)
 
-		// Update position
-		torpedo.X += torpedo.XAcc
-		torpedo.Y += torpedo.YAcc
+// 		// Update position
+// 		torpedo.X += torpedo.XAcc
+// 		torpedo.Y += torpedo.YAcc
 
-		// Remove off-screen torpedoes
-		if torpedo.Y >= HEIGHT+TorpedoR || torpedo.X < -TorpedoR ||
-			torpedo.X >= WIDTH+TorpedoR || torpedo.Y < -HEIGHT {
-			g.Torpedos.Release(idx)
-		}
-	})
+// 		// Remove off-screen torpedoes
+// 		if torpedo.Y >= HEIGHT+TorpedoR || torpedo.X < -TorpedoR ||
+// 			torpedo.X >= WIDTH+TorpedoR || torpedo.Y < -HEIGHT {
+// 			g.Torpedos.Release(idx)
+// 		}
+// 	})
 
-	// Advance torpedo animation
-	g.TorpedoFrame = (g.TorpedoFrame + 1) % len(g.TorpedoImages)
-	g.Ship.Timeout--
-}
+// 	// Advance torpedo animation
+// 	g.TorpedoFrame = (g.TorpedoFrame + 1) % len(g.TorpedoImages)
+// }
 
 // UpdateExplosions updates and renders explosions.
 func (g *Game) UpdateExplosions() {
@@ -381,23 +316,8 @@ func (g *Game) UpdateExplosions() {
 
 // RenderShip renders the player ship.
 func (g *Game) RenderShip() {
-	g.Ctx.Call("save")
-	g.Ctx.Call("translate", g.Ship.X, g.Ship.Y)
-	g.Ctx.Call("rotate", g.Ship.Angle*ShipMaxAngle/180*math.Pi)
-	g.Ctx.Call("drawImage", g.Ship.Image, -ShipR/2, -ShipR)
-	g.Ctx.Call("restore")
-
-	// Shield effect
-	if g.Ship.Shield.T > 0 {
-		mathRandom := js.Global.Get("Math").Call("random").Float()
-		if g.Ship.Shield.T > 30 || mathRandom > 0.5 {
-			g.Ctx.Call("drawImage", g.Ship.Shield.Image,
-				int(g.Ship.X)-ShipR, int(g.Ship.Y)-ShipR)
-		}
-		g.Ship.Shield.T--
-		if g.Ship.Shield.T == 0 {
-			g.Audio.Play(4)
-		}
+	for _, s := range g.Ships {
+		s.Render(g)
 	}
 }
 
@@ -408,14 +328,17 @@ func (g *Game) CheckWaveSpawn() {
 		g.Level.LevelNum++
 
 		// Generate deterministic seed for this level
-		g.Level.LevelSeed = LevelSeed(g.GameSeed, g.Level.LevelNum)
+		g.Level.LevelSeed = common.LevelSeed(g.GameSeed, g.Level.LevelNum)
 		g.GameRNG.SetSeed(g.Level.LevelSeed)
 
+		// Transition music to new level's key/preset
+		g.Audio.SetMusicPreset(g.Level.LevelNum)
+
 		// Spawn all enemy types
-		g.SpawnEnemy(0, -0.75*HEIGHT)
-		g.SpawnEnemy(1, -1.5*HEIGHT)
-		g.SpawnEnemy(2, -1*HEIGHT)
-		g.SpawnEnemy(3, -2.25*HEIGHT)
+		g.SpawnEnemy(SmallFighter, -0.75*HEIGHT)
+		g.SpawnEnemy(MediumFighter, -1.5*HEIGHT)
+		g.SpawnEnemy(TurretFighter, -1*HEIGHT)
+		g.SpawnEnemy(Boss, -2.25*HEIGHT)
 
 		g.SpawnText("WAVE "+strconv.Itoa(g.Level.LevelNum), 0)
 		g.Level.Bomb = MaxBomb
@@ -425,108 +348,111 @@ func (g *Game) CheckWaveSpawn() {
 
 // UpdateEnemies updates and renders enemies.
 func (g *Game) UpdateEnemies() {
-	for i := len(g.Enemies) - 1; i >= 0; i-- {
-		enemy := g.Enemies[i]
-		enemyY := enemy.Y + enemy.YOffset
-
-		// Calculate angle to player
-		angle := math.Atan((enemy.X - g.Ship.X) / (enemyY - g.Ship.Y))
-		if g.Ship.Y <= enemyY {
-			angle += math.Pi
-		}
-
-		// Calculate visual rotation
-		bossAngle := math.Mod(angle+math.Pi, math.Pi*2) - math.Pi
-		if bossAngle > enemy.MaxAngle {
-			bossAngle = enemy.MaxAngle
-		}
-		if bossAngle < -enemy.MaxAngle {
-			bossAngle = -enemy.MaxAngle
-		}
-		enemy.Angle = (enemy.Angle*29 - bossAngle) / 30
-
-		// Render enemy
-		g.Ctx.Call("save")
-		g.Ctx.Call("translate", enemy.X, enemyY)
-		g.Ctx.Call("rotate", enemy.Angle)
-		g.Ctx.Call("drawImage", enemy.Image,
-			-enemy.R, enemy.Y-enemyY-enemy.R, enemy.R*2, enemy.R*2)
-		g.Ctx.Call("restore")
-
-		// Check bullet collisions
-		hitboxD := enemy.R * 0.6
-		g.Bullets.ForEachReverse(func(bullet *Bullet, bulletIdx int) {
-			if bullet.Y < enemy.Y+hitboxD && bullet.Y > enemy.Y-hitboxD &&
-				bullet.X > enemy.X-hitboxD && bullet.X < enemy.X+hitboxD {
-
-				g.Level.P++
-				g.Explode(bullet.X, bullet.Y, 0)
-				g.Bullets.Release(bulletIdx)
-
-				enemy.E--
-				if enemy.E <= 0 {
-					g.Level.P += 100
-					g.SpawnBonus(enemy.X, enemy.Y, 0, 0, "")
-					g.Explode(enemy.X, enemy.Y, enemy.R*2)
-					g.Explode(enemy.X, enemy.Y, enemy.R*3)
-					g.RemoveEnemy(i)
-					g.Audio.Play(10)
-				} else {
-					g.Audio.Play(9)
-				}
-			}
-		})
-
-		// Skip if enemy was destroyed
-		if i >= len(g.Enemies) {
-			continue
-		}
-
-		// Move enemy toward stop position
-		if enemy.Y < enemy.YStop {
-			enemy.Y++
-		}
-
-		// Fire at player
-		enemy.T--
-		if enemy.T < 0 {
-			g.EnemyShoot(enemy, angle)
+	for i, e := range g.Enemies {
+		if !e.Render(g) {
+			// enemy no longer exists
+			g.RemoveEnemy(i)
 		}
 	}
+
+	// for i := len(g.Enemies) - 1; i >= 0; i-- {
+
+	// 	enemyDestroyed := false
+	// 	g.Bullets.ForEachReverse(func(bullet *Bullet, bulletIdx int) {
+	// 		if enemyDestroyed {
+	// 			return
+	// 		}
+	// 		if bullet.Y < enemy.Y+hitboxD && bullet.Y > enemy.Y-hitboxD &&
+	// 			bullet.X > enemy.X-hitboxD && bullet.X < enemy.X+hitboxD {
+
+	// 			g.Level.P++
+	// 			g.Explode(bullet.X, bullet.Y, 0)
+	// 			g.Bullets.Release(bulletIdx)
+
+	// 			enemy.Health--
+	// 			if enemy.Health <= 0 {
+	// 				g.Level.P += 100
+	// 				g.SpawnBonus(enemy.X, enemy.Y, 0, 0, "")
+	// 				g.Explode(enemy.X, enemy.Y, enemy.Radius*2)
+	// 				g.Explode(enemy.X, enemy.Y, enemy.Radius*3)
+	// 				vol := enemy.DistanceVolume(g.Ships.X, g.Ships.Y, float64(HEIGHT))
+	// 				g.Audio.PlayWithPan(10, enemy.AudioPan(), vol)
+	// 				g.RemoveEnemy(i)
+	// 				enemyDestroyed = true
+	// 			} else {
+	// 				// hit sound
+	// 				vol := enemy.DistanceVolume(g.Ships.X, g.Ships.Y, float64(HEIGHT))
+	// 				g.Audio.PlayWithPan(9, enemy.AudioPan(), vol)
+	// 			}
+	// 		}
+	// 	})
+	// }
+
+	// Update enemy-reactive synth layers
+	g.updateEnemySynthLayers()
+}
+
+// updateEnemySynthLayers calculates enemy metrics and updates synth.
+func (g *Game) updateEnemySynthLayers() {
+	// enemyCount := len(g.Enemies)
+	// if enemyCount == 0 {
+	// 	g.Audio.UpdateEnemySynth(0, float64(HEIGHT), 9999)
+	// 	return
+	// }
+
+	// // Calculate average enemy Y position and closest distance
+	// var totalY float64
+	// closestDist := 9999.0
+
+	// for _, enemy := range g.Enemies {
+	// 	enemyY := enemy.Y + enemy.YOffset
+	// 	totalY += enemyY
+
+	// 	// Distance from enemy to player
+	// 	dx := enemy.X - g.Ships.X
+	// 	dy := enemyY - g.Ships.Y
+	// 	dist := math.Sqrt(dx*dx + dy*dy)
+	// 	if dist < closestDist {
+	// 		closestDist = dist
+	// 	}
+	// }
+
+	// avgY := totalY / float64(enemyCount)
+	// g.Audio.UpdateEnemySynth(enemyCount, avgY, closestDist)
 }
 
 // RenderEnergyBar renders the energy bar HUD.
-func (g *Game) RenderEnergyBar() {
-	if g.Ship.OSD > 0 {
-		barX := int(g.Ship.X) - 32
-		barY := int(g.Ship.Y) + 63
-		colorValue := g.Ship.E * 512 / 100
+// func (g *Game) RenderEnergyBar() {
+// 	if g.Ships.OSD > 0 {
+// 		barX := int(g.Ships.X) - 32
+// 		barY := int(g.Ships.Y) + 63
+// 		colorValue := g.Ships.E * 512 / 100
 
-		g.Ctx.Set("globalAlpha", float64(g.Ship.OSD)/float64(ShipMaxOSD))
-		g.Ctx.Set("fillStyle", Theme.EnergyBarBackground)
-		g.Ctx.Call("fillRect", barX, barY, 64, 4)
+// 		g.Ctx.Set("globalAlpha", float64(g.Ships.OSD)/float64(ShipMaxOSD))
+// 		g.Ctx.Set("fillStyle", Theme.EnergyBarBackground)
+// 		g.Ctx.Call("fillRect", barX, barY, 64, 4)
 
-		var r, gr int
-		if colorValue > 255 {
-			r = 512 - colorValue
-			gr = 255
-		} else {
-			r = 255
-			gr = colorValue
-		}
-		g.Ctx.Set("fillStyle", "rgb("+strconv.Itoa(r)+","+strconv.Itoa(gr)+",0)")
-		g.Ctx.Call("fillRect", barX, barY, g.Ship.E*64/100, 4)
+// 		var r, gr int
+// 		if colorValue > 255 {
+// 			r = 512 - colorValue
+// 			gr = 255
+// 		} else {
+// 			r = 255
+// 			gr = colorValue
+// 		}
+// 		g.Ctx.Set("fillStyle", "rgb("+strconv.Itoa(r)+","+strconv.Itoa(gr)+",0)")
+// 		g.Ctx.Call("fillRect", barX, barY, g.Ships.E*64/100, 4)
 
-		g.Ctx.Set("lineWidth", Theme.EnergyBarLineWidth)
-		g.Ctx.Set("strokeStyle", Theme.EnergyBarBorder)
-		g.Ctx.Call("strokeRect", barX, barY, 64, 4)
-		g.Ctx.Set("globalAlpha", 1)
+// 		g.Ctx.Set("lineWidth", Theme.EnergyBarLineWidth)
+// 		g.Ctx.Set("strokeStyle", Theme.EnergyBarBorder)
+// 		g.Ctx.Call("strokeRect", barX, barY, 64, 4)
+// 		g.Ctx.Set("globalAlpha", 1)
 
-		if g.Ship.E >= 25 {
-			g.Ship.OSD--
-		}
-	}
-}
+// 		if g.Ships.E >= 25 {
+// 			g.Ships.OSD--
+// 		}
+// 	}
+// }
 
 func min(a, b int) int {
 	if a < b {

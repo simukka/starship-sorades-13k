@@ -1,0 +1,331 @@
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #4a9eff; padding-bottom: 10px;">
+	<h2 style="margin: 0; color: #4a9eff;">🎛️ AUDIO CONTROL PANEL</h2>
+	<button id="audio-panel-close" style="background: #ff4a4a; border: none; color: white; padding: 5px 15px; cursor: pointer; border-radius: 4px;">✕ CLOSE</button>
+</div>
+
+<!-- Tab Navigation -->
+<div class="tab-nav" style="display: flex; gap: 5px; margin-bottom: 15px;">
+	<button class="tab-btn active" data-tab="mixer">🎚️ Mixer</button>
+	<button class="tab-btn" data-tab="sfx">🔊 Sound FX</button>
+	<button class="tab-btn" data-tab="music">🎵 Music Preset</button>
+</div>
+
+<!-- MIXER TAB -->
+<div id="tab-mixer" class="tab-content active">
+	<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+		<!-- Master Section -->
+		<div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 5px;">
+			<h3 style="margin: 0 0 10px 0; color: #ffaa00;">MASTER</h3>
+			<div class="slider-group">
+				<label>Master Volume</label>
+				<input type="range" id="ctrl-master-vol" min="0" max="100" value="70" class="audio-slider">
+				<span id="ctrl-master-vol-val">70%</span>
+			</div>
+			<div class="slider-group">
+				<label>Reverb Mix</label>
+				<input type="range" id="ctrl-reverb-mix" min="0" max="100" value="30" class="audio-slider">
+				<span id="ctrl-reverb-mix-val">30%</span>
+			</div>
+		</div>
+
+		<!-- Synth Section -->
+		<div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 5px;">
+			<h3 style="margin: 0 0 10px 0; color: #ffaa00;">SYNTH MUSIC</h3>
+			<div class="slider-group">
+				<label>Synth Volume</label>
+				<input type="range" id="ctrl-synth-vol" min="0" max="100" value="15" class="audio-slider">
+				<span id="ctrl-synth-vol-val">15%</span>
+			</div>
+			<div class="slider-group">
+				<label>Drone Pad</label>
+				<input type="range" id="ctrl-drone-vol" min="0" max="100" value="15" class="audio-slider">
+				<span id="ctrl-drone-vol-val">15%</span>
+			</div>
+			<div class="slider-group">
+				<label>Arpeggio</label>
+				<input type="range" id="ctrl-arp-vol" min="0" max="100" value="8" class="audio-slider">
+				<span id="ctrl-arp-vol-val">8%</span>
+			</div>
+			<div class="slider-group">
+				<label>Bass Line</label>
+				<input type="range" id="ctrl-bass-vol" min="0" max="100" value="20" class="audio-slider">
+				<span id="ctrl-bass-vol-val">20%</span>
+			</div>
+		</div>
+
+		<!-- Reactive Layers Section -->
+		<div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 5px;">
+			<h3 style="margin: 0 0 10px 0; color: #ff6600;">REACTIVE LAYERS</h3>
+			<div class="slider-group">
+				<label>Reactive Master</label>
+				<input type="range" id="ctrl-reactive-vol" min="0" max="100" value="35" class="audio-slider">
+				<span id="ctrl-reactive-vol-val">35%</span>
+			</div>
+			<div class="slider-group">
+				<label>Reactive Reverb</label>
+				<input type="range" id="ctrl-reactive-reverb" min="0" max="100" value="70" class="audio-slider">
+				<span id="ctrl-reactive-reverb-val">70%</span>
+			</div>
+			<div class="slider-group">
+				<label>Tension Layer</label>
+				<input type="range" id="ctrl-tension-vol" min="0" max="100" value="15" class="audio-slider">
+				<span id="ctrl-tension-vol-val">15%</span>
+			</div>
+			<div class="slider-group">
+				<label>Tension Filter</label>
+				<input type="range" id="ctrl-tension-filter" min="100" max="2000" value="200" class="audio-slider">
+				<span id="ctrl-tension-filter-val">200Hz</span>
+			</div>
+		</div>
+
+		<!-- Blade Runner Layers -->
+		<div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 5px;">
+			<h3 style="margin: 0 0 10px 0; color: #ff6600;">BLADE RUNNER FX</h3>
+			<div class="slider-group">
+				<label>Shimmer</label>
+				<input type="range" id="ctrl-shimmer-vol" min="0" max="100" value="6" class="audio-slider">
+				<span id="ctrl-shimmer-vol-val">6%</span>
+			</div>
+			<div class="slider-group">
+				<label>Danger Siren</label>
+				<input type="range" id="ctrl-siren-vol" min="0" max="100" value="20" class="audio-slider">
+				<span id="ctrl-siren-vol-val">20%</span>
+			</div>
+			<div class="slider-group">
+				<label>Sub Bass</label>
+				<input type="range" id="ctrl-subbass-vol" min="0" max="100" value="20" class="audio-slider">
+				<span id="ctrl-subbass-vol-val">20%</span>
+			</div>
+			<div class="slider-group">
+				<label>Atmo Pad</label>
+				<input type="range" id="ctrl-pad-vol" min="0" max="100" value="10" class="audio-slider">
+				<span id="ctrl-pad-vol-val">10%</span>
+			</div>
+			<div class="slider-group">
+				<label>Pad Filter</label>
+				<input type="range" id="ctrl-pad-filter" min="100" max="2000" value="400" class="audio-slider">
+				<span id="ctrl-pad-filter-val">400Hz</span>
+			</div>
+			<div class="slider-group">
+				<label>Pulse</label>
+				<input type="range" id="ctrl-pulse-vol" min="0" max="100" value="10" class="audio-slider">
+				<span id="ctrl-pulse-vol-val">10%</span>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- SFX TAB -->
+<div id="tab-sfx" class="tab-content" style="display: none;">
+	<div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 5px; max-height: 400px; overflow-y: auto;">
+		<h3 style="margin: 0 0 10px 0; color: #ffaa00;">SOUND EFFECTS (jsfxr)</h3>
+		<p style="color: #888; font-size: 11px; margin-bottom: 10px;">Click ▶ to preview, ✎ to edit parameters</p>
+		{{range .Categories}}
+		<div class="sfx-category">
+			<h4 style="color: #ffaa00; margin: 10px 0 5px 0;">{{.Name}}</h4>
+			{{range .Effects}}
+			<div class="sfx-row" data-sfx-id="{{.ID}}">
+				<span class="sfx-name">{{.Name}}</span>
+				<span class="sfx-wave">{{.WaveTypeName}}</span>
+				<button class="sfx-play-btn" data-id="{{.ID}}">▶</button>
+				<button class="sfx-edit-btn" data-id="{{.ID}}">✎</button>
+			</div>
+			{{end}}
+		</div>
+		{{end}}
+	</div>
+	
+	<!-- SFX Editor Panel (hidden by default) -->
+	<div id="sfx-editor" style="display: none; background: rgba(0,0,0,0.5); padding: 15px; border-radius: 5px; margin-top: 15px; border: 1px solid #ff6600;">
+		<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+			<h4 id="sfx-editor-title" style="margin: 0; color: #ff6600;">Edit: Sound Name</h4>
+			<button id="sfx-editor-close" style="background: #666; border: none; color: white; padding: 3px 10px; cursor: pointer; border-radius: 3px;">Close</button>
+		</div>
+		
+		<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+			<div class="slider-group">
+				<label>Wave Type</label>
+				<select id="sfx-wave" class="sfx-select">
+					<option value="0">Square</option>
+					<option value="1">Sawtooth</option>
+					<option value="2">Sine</option>
+					<option value="3">Noise</option>
+				</select>
+			</div>
+			<div class="slider-group">
+				<label>Volume</label>
+				<input type="range" id="sfx-volume" min="0" max="100" value="50" class="audio-slider">
+				<span id="sfx-volume-val">50%</span>
+			</div>
+			<div class="slider-group">
+				<label>Attack</label>
+				<input type="range" id="sfx-attack" min="0" max="100" value="0" class="audio-slider">
+				<span id="sfx-attack-val">0%</span>
+			</div>
+			<div class="slider-group">
+				<label>Sustain</label>
+				<input type="range" id="sfx-sustain" min="0" max="100" value="20" class="audio-slider">
+				<span id="sfx-sustain-val">20%</span>
+			</div>
+			<div class="slider-group">
+				<label>Decay</label>
+				<input type="range" id="sfx-decay" min="0" max="100" value="50" class="audio-slider">
+				<span id="sfx-decay-val">50%</span>
+			</div>
+			<div class="slider-group">
+				<label>Frequency</label>
+				<input type="range" id="sfx-freq" min="0" max="100" value="50" class="audio-slider">
+				<span id="sfx-freq-val">50%</span>
+			</div>
+			<div class="slider-group">
+				<label>Slide</label>
+				<input type="range" id="sfx-slide" min="-100" max="100" value="0" class="audio-slider">
+				<span id="sfx-slide-val">0</span>
+			</div>
+			<div class="slider-group">
+				<label>Vibrato</label>
+				<input type="range" id="sfx-vibrato" min="0" max="100" value="0" class="audio-slider">
+				<span id="sfx-vibrato-val">0%</span>
+			</div>
+		</div>
+		
+		<div style="margin-top: 10px; display: flex; gap: 10px;">
+			<button id="sfx-preview" style="background: #4a9eff; border: none; color: white; padding: 8px 20px; cursor: pointer; border-radius: 4px;">▶ Preview</button>
+			<button id="sfx-apply" style="background: #44aa44; border: none; color: white; padding: 8px 20px; cursor: pointer; border-radius: 4px;">✓ Apply</button>
+			<button id="sfx-reset" style="background: #aa4444; border: none; color: white; padding: 8px 20px; cursor: pointer; border-radius: 4px;">↺ Reset</button>
+		</div>
+	</div>
+</div>
+
+<!-- MUSIC PRESET TAB -->
+<div id="tab-music" class="tab-content" style="display: none;">
+	<div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 5px;">
+		<h3 style="margin: 0 0 10px 0; color: #ffaa00;">MUSIC PRESET</h3>
+		<p id="current-preset-name" style="color: #4a9eff; margin-bottom: 15px;">Current: {{.CurrentPreset}}</p>
+		
+		<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+			{{range .Presets}}
+			<button class="preset-btn" data-level="{{.Level}}" style="padding: 15px; background: rgba(74,158,255,0.2); border: 1px solid #4a9eff; color: white; cursor: pointer; border-radius: 5px;">
+				<strong>Level {{.Level}}</strong><br>
+				<small>{{.Key}}<br>{{.Name}}</small>
+			</button>
+			{{end}}
+		</div>
+	</div>
+</div>
+
+<style>
+	.tab-nav button {
+		padding: 8px 16px;
+		background: rgba(0,0,0,0.3);
+		border: 1px solid #4a9eff;
+		color: #aaa;
+		cursor: pointer;
+		border-radius: 4px;
+		transition: all 0.2s;
+	}
+	.tab-nav button.active {
+		background: #4a9eff;
+		color: white;
+	}
+	.tab-nav button:hover {
+		background: rgba(74,158,255,0.3);
+	}
+	.tab-content {
+		display: none;
+	}
+	.tab-content.active {
+		display: block;
+	}
+	.sfx-row {
+		display: flex;
+		align-items: center;
+		padding: 5px 0;
+		border-bottom: 1px solid rgba(255,255,255,0.1);
+		gap: 10px;
+	}
+	.sfx-name {
+		flex: 1;
+		color: #ccc;
+	}
+	.sfx-wave {
+		color: #888;
+		font-size: 11px;
+		width: 60px;
+	}
+	.sfx-play-btn, .sfx-edit-btn {
+		padding: 3px 8px;
+		border: none;
+		border-radius: 3px;
+		cursor: pointer;
+		font-size: 12px;
+	}
+	.sfx-play-btn {
+		background: #4a9eff;
+		color: white;
+	}
+	.sfx-edit-btn {
+		background: #ff6600;
+		color: white;
+	}
+	.sfx-select {
+		flex: 1;
+		background: #333;
+		color: white;
+		border: 1px solid #4a9eff;
+		padding: 5px;
+		border-radius: 3px;
+	}
+	.preset-btn:hover {
+		background: rgba(74,158,255,0.4) !important;
+	}
+	.slider-group {
+		display: flex;
+		align-items: center;
+		margin-bottom: 8px;
+		gap: 10px;
+	}
+	.slider-group label {
+		flex: 0 0 100px;
+		color: #aaa;
+	}
+	.slider-group span {
+		flex: 0 0 50px;
+		text-align: right;
+		color: #4a9eff;
+	}
+	.audio-slider {
+		flex: 1;
+		-webkit-appearance: none;
+		height: 6px;
+		background: #333;
+		border-radius: 3px;
+		outline: none;
+	}
+	.audio-slider::-webkit-slider-thumb {
+		-webkit-appearance: none;
+		width: 14px;
+		height: 14px;
+		background: #4a9eff;
+		border-radius: 50%;
+		cursor: pointer;
+	}
+	.audio-slider::-moz-range-thumb {
+		width: 14px;
+		height: 14px;
+		background: #4a9eff;
+		border-radius: 50%;
+		cursor: pointer;
+		border: none;
+	}
+	#audio-control-panel::-webkit-scrollbar {
+		width: 8px;
+	}
+	#audio-control-panel::-webkit-scrollbar-track {
+		background: #1a1a2e;
+	}
+	#audio-control-panel::-webkit-scrollbar-thumb {
+		background: #4a9eff;
+		border-radius: 4px;
+	}
+</style>

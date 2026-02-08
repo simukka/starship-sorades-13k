@@ -26,6 +26,22 @@ func RenderToCanvas(width, height int, renderFn func(canvas, ctx *js.Object)) *j
 	return canvas
 }
 
+func (g *Game) InitializeAudio() {
+	// Initialize audio
+	sounds := g.Audio.Init()
+
+	// Load all sound effects using pure Go jsfxr implementation
+	for i, dataURL := range sounds {
+		g.Audio.LoadSound(i, dataURL)
+	}
+
+	// Initialize audio control panel (right-click to open)
+	g.Audio.InitControlPanel(g.Canvas)
+
+	// Initialize graphics (background, sprites, etc.)
+	g.InitializeGraphics()
+}
+
 // InitializeGraphics renders all static game graphics.
 func (g *Game) InitializeGraphics() {
 	// Score digit sprites (0-9)
@@ -79,58 +95,59 @@ func (g *Game) InitializeGraphics() {
 	g.Level.BackgroundPattern = g.Ctx.Call("createPattern", g.Level.Background, "repeat")
 
 	// Player ship sprite
-	g.Ship.Image = RenderToCanvas(ShipR, ShipR*2, func(canvas, ctx *js.Object) {
-		w := canvas.Get("width").Float()
-		h := canvas.Get("height").Float()
+	for _, s := range g.Ships {
+		s.Image = RenderToCanvas(ShipR, ShipR*2, func(canvas, ctx *js.Object) {
+			w := canvas.Get("width").Float()
+			h := canvas.Get("height").Float()
 
-		ctx.Call("beginPath")
-		for i := 4; i >= 0; i-- {
-			fi := float64(i)
-			ctx.Call("moveTo", w/2, h*(1+fi)/10)
-			ctx.Call("lineTo", w*(11+fi)/16, h*(15-fi)/16)
-			ctx.Call("lineTo", w*(5-fi)/16, h*(15-fi)/16)
+			ctx.Call("beginPath")
+			for i := 4; i >= 0; i-- {
+				fi := float64(i)
+				ctx.Call("moveTo", w/2, h*(1+fi)/10)
+				ctx.Call("lineTo", w*(11+fi)/16, h*(15-fi)/16)
+				ctx.Call("lineTo", w*(5-fi)/16, h*(15-fi)/16)
+				ctx.Call("closePath")
+			}
+			lineWidth := int(w / 17)
+			ctx.Set("lineWidth", lineWidth)
+			ctx.Set("shadowBlur", lineWidth*2)
+			ctx.Set("strokeStyle", Theme.ShipColor)
+			ctx.Set("shadowColor", Theme.ShipGlow)
+			ctx.Call("stroke")
+			ctx.Call("stroke")
+
+			// Center diamond
+			p := w / 6
+			ctx.Call("beginPath")
+			ctx.Call("moveTo", w/2-p, h/2)
+			ctx.Call("lineTo", w/2, h/2+p)
+			ctx.Call("lineTo", w/2+p, h/2)
+			ctx.Call("lineTo", w/2, h/2-p)
 			ctx.Call("closePath")
-		}
-		lineWidth := int(w / 17)
-		ctx.Set("lineWidth", lineWidth)
-		ctx.Set("shadowBlur", lineWidth*2)
-		ctx.Set("strokeStyle", Theme.ShipColor)
-		ctx.Set("shadowColor", Theme.ShipGlow)
-		ctx.Call("stroke")
-		ctx.Call("stroke")
+			ctx.Set("strokeStyle", Theme.ShipCenterColor)
+			ctx.Set("shadowColor", Theme.ShipCenterColor)
+			ctx.Call("stroke")
+			ctx.Call("stroke")
+		})
 
-		// Center diamond
-		p := w / 6
-		ctx.Call("beginPath")
-		ctx.Call("moveTo", w/2-p, h/2)
-		ctx.Call("lineTo", w/2, h/2+p)
-		ctx.Call("lineTo", w/2+p, h/2)
-		ctx.Call("lineTo", w/2, h/2-p)
-		ctx.Call("closePath")
-		ctx.Set("strokeStyle", Theme.ShipCenterColor)
-		ctx.Set("shadowColor", Theme.ShipCenterColor)
-		ctx.Call("stroke")
-		ctx.Call("stroke")
-	})
+		s.Shield.Image = RenderToCanvas(ShipR*2, ShipR*2, func(canvas, ctx *js.Object) {
+			w := canvas.Get("width").Float()
+			d := 8.0
+			ctx.Set("lineWidth", 18)
+			ctx.Set("shadowBlur", Theme.ShieldShadowBlur)
+			ctx.Set("strokeStyle", Theme.ShieldColor)
+			ctx.Set("shadowColor", Theme.ShieldGlowColor)
+			ctx.Call("beginPath")
+			ctx.Call("arc", w/2, w/2, w/2+9-d, 0, math.Pi*2)
+			ctx.Call("stroke")
 
-	// Shield effect sprite
-	g.Ship.Shield.Image = RenderToCanvas(ShipR*2, ShipR*2, func(canvas, ctx *js.Object) {
-		w := canvas.Get("width").Float()
-		d := 8.0
-		ctx.Set("lineWidth", 18)
-		ctx.Set("shadowBlur", Theme.ShieldShadowBlur)
-		ctx.Set("strokeStyle", Theme.ShieldColor)
-		ctx.Set("shadowColor", Theme.ShieldGlowColor)
-		ctx.Call("beginPath")
-		ctx.Call("arc", w/2, w/2, w/2+9-d, 0, math.Pi*2)
-		ctx.Call("stroke")
-
-		ctx.Set("lineWidth", 26+d)
-		ctx.Set("shadowBlur", 0)
-		ctx.Call("beginPath")
-		ctx.Call("arc", w/2, w/2, w/2+13+d/2-d, 0, math.Pi*2)
-		ctx.Call("stroke")
-	})
+			ctx.Set("lineWidth", 26+d)
+			ctx.Set("shadowBlur", 0)
+			ctx.Call("beginPath")
+			ctx.Call("arc", w/2, w/2, w/2+13+d/2-d, 0, math.Pi*2)
+			ctx.Call("stroke")
+		})
+	}
 
 	// Bullet sprite
 	g.BulletImage = RenderToCanvas(BulletR*2, BulletR*2, func(canvas, ctx *js.Object) {
@@ -215,151 +232,159 @@ func (g *Game) InitializeEnemyGraphics() {
 	r := float64(ShipR)
 
 	// Enemy type 0 - small fighter
-	g.EnemyTypes[0].R = r
-	g.EnemyTypes[0].Image = RenderToCanvas(int(r*2), int(r*2), func(canvas, ctx *js.Object) {
-		w := canvas.Get("width").Float()
-		h := canvas.Get("height").Float()
+	g.EnemyTypes[SmallFighter] = EnemyType{
+		R: r,
+		Image: RenderToCanvas(int(r*2), int(r*2), func(canvas, ctx *js.Object) {
+			w := canvas.Get("width").Float()
+			h := canvas.Get("height").Float()
 
-		ctx.Set("lineWidth", Theme.EnemyLineWidth)
-		ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
-		ctx.Set("strokeStyle", Theme.EnemyColor)
-		ctx.Set("shadowColor", Theme.EnemyGlow)
-		ctx.Set("miterLimit", 128)
-		ctx.Call("beginPath")
+			ctx.Set("lineWidth", Theme.EnemyLineWidth)
+			ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
+			ctx.Set("strokeStyle", Theme.EnemyColor)
+			ctx.Set("shadowColor", Theme.EnemyGlow)
+			ctx.Set("miterLimit", 128)
+			ctx.Call("beginPath")
 
-		for i := 4; i >= 0; i-- {
-			fi := float64(i)
-			x1 := w * (6 - fi) / 11
-			y1 := h * (6 - fi) / 20
-			x2 := w * (11 - fi) / 26
-			y2 := h * (1 + fi) / 9
+			for i := 4; i >= 0; i-- {
+				fi := float64(i)
+				x1 := w * (6 - fi) / 11
+				y1 := h * (6 - fi) / 20
+				x2 := w * (11 - fi) / 26
+				y2 := h * (1 + fi) / 9
 
-			ctx.Call("moveTo", w/2, h*(12-fi)/12-6)
-			ctx.Call("lineTo", w-x1, y1)
-			ctx.Call("lineTo", w-x2, y2)
-			ctx.Call("lineTo", x2, y2)
-			ctx.Call("lineTo", x1, y1)
-			ctx.Call("closePath")
-		}
+				ctx.Call("moveTo", w/2, h*(12-fi)/12-6)
+				ctx.Call("lineTo", w-x1, y1)
+				ctx.Call("lineTo", w-x2, y2)
+				ctx.Call("lineTo", x2, y2)
+				ctx.Call("lineTo", x1, y1)
+				ctx.Call("closePath")
+			}
 
-		ctx.Call("stroke")
-		ctx.Call("stroke")
-		renderHeart(ctx, w/2, h/2, r)
-	})
+			ctx.Call("stroke")
+			ctx.Call("stroke")
+			renderHeart(ctx, w/2, h/2, r)
+		}),
+	}
 
 	// Enemy type 1 - medium fighter
-	g.EnemyTypes[1].R = r
-	g.EnemyTypes[1].Image = RenderToCanvas(int(r*2), int(r*2), func(canvas, ctx *js.Object) {
-		w := canvas.Get("width").Float()
-		h := canvas.Get("height").Float()
+	g.EnemyTypes[MediumFighter] = EnemyType{
+		R: r,
+		Image: RenderToCanvas(int(r*2), int(r*2), func(canvas, ctx *js.Object) {
+			w := canvas.Get("width").Float()
+			h := canvas.Get("height").Float()
 
-		ctx.Set("lineWidth", Theme.EnemyLineWidth)
-		ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
-		ctx.Set("strokeStyle", Theme.EnemyColor)
-		ctx.Set("shadowColor", Theme.EnemyGlow)
+			ctx.Set("lineWidth", Theme.EnemyLineWidth)
+			ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
+			ctx.Set("strokeStyle", Theme.EnemyColor)
+			ctx.Set("shadowColor", Theme.EnemyGlow)
 
-		for i := 4; i >= 0; i-- {
-			fi := float64(i)
-			x1 := w*(5-fi)/14 + 6
-			y1 := h * (16 - fi) / 17
-			x2 := w * (8 - fi) / 22
-			y2 := h * (1 + fi) / 11
+			for i := 4; i >= 0; i-- {
+				fi := float64(i)
+				x1 := w*(5-fi)/14 + 6
+				y1 := h * (16 - fi) / 17
+				x2 := w * (8 - fi) / 22
+				y2 := h * (1 + fi) / 11
 
-			ctx.Call("moveTo", w/2, h*(6-fi)/12)
-			ctx.Call("lineTo", w-x1, y1)
-			ctx.Call("lineTo", w-x2, y2)
-			ctx.Call("lineTo", x2, y2)
-			ctx.Call("lineTo", x1, y1)
-			ctx.Call("closePath")
-		}
+				ctx.Call("moveTo", w/2, h*(6-fi)/12)
+				ctx.Call("lineTo", w-x1, y1)
+				ctx.Call("lineTo", w-x2, y2)
+				ctx.Call("lineTo", x2, y2)
+				ctx.Call("lineTo", x1, y1)
+				ctx.Call("closePath")
+			}
 
-		ctx.Call("stroke")
-		ctx.Call("stroke")
-		renderHeart(ctx, w/2, h/2, r)
-	})
+			ctx.Call("stroke")
+			ctx.Call("stroke")
+			renderHeart(ctx, w/2, h/2, r)
+		}),
+	}
 
 	// Enemy type 2 - turret
-	g.EnemyTypes[2].R = r
-	g.EnemyTypes[2].Image = RenderToCanvas(int(r*2), int(r*2), func(canvas, ctx *js.Object) {
-		w := canvas.Get("width").Float()
+	g.EnemyTypes[TurretFighter] = EnemyType{
+		R: r,
+		Image: RenderToCanvas(int(r*2), int(r*2), func(canvas, ctx *js.Object) {
+			w := canvas.Get("width").Float()
 
-		ctx.Set("lineWidth", Theme.EnemyLineWidth)
-		ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
-		ctx.Set("strokeStyle", Theme.EnemyColor)
-		ctx.Set("shadowColor", Theme.EnemyGlow)
-		ctx.Set("miterLimit", 32)
-		ctx.Call("beginPath")
+			ctx.Set("lineWidth", Theme.EnemyLineWidth)
+			ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
+			ctx.Set("strokeStyle", Theme.EnemyColor)
+			ctx.Set("shadowColor", Theme.EnemyGlow)
+			ctx.Set("miterLimit", 32)
+			ctx.Call("beginPath")
 
-		// Outer spiky ring
-		for i := 0.0; i < math.Pi*2; i += math.Pi / 4 {
-			d := math.Pi / 12
-			rr := w/2 - 6
-			x := w/2 + math.Sin(i+d)*rr
-			y := w/2 + math.Cos(i+d)*rr
+			// Outer spiky ring
+			for i := 0.0; i < math.Pi*2; i += math.Pi / 4 {
+				d := math.Pi / 12
+				rr := w/2 - 6
+				x := w/2 + math.Sin(i+d)*rr
+				y := w/2 + math.Cos(i+d)*rr
 
-			if i == 0 {
-				ctx.Call("moveTo", x, y)
-			} else {
-				ctx.Call("lineTo", x, y)
+				if i == 0 {
+					ctx.Call("moveTo", x, y)
+				} else {
+					ctx.Call("lineTo", x, y)
+				}
+
+				d -= math.Pi / 1.45
+				ctx.Call("lineTo", w/2+math.Sin(i+d)*rr, w/2+math.Cos(i+d)*rr)
 			}
+			ctx.Call("closePath")
 
-			d -= math.Pi / 1.45
-			ctx.Call("lineTo", w/2+math.Sin(i+d)*rr, w/2+math.Cos(i+d)*rr)
-		}
-		ctx.Call("closePath")
+			// Inner octagon
+			for i := 0.0; i < math.Pi*2; i += math.Pi / 4 {
+				rr := w * 0.4
+				x := w/2 + math.Sin(i)*rr
+				y := w/2 + math.Cos(i)*rr
 
-		// Inner octagon
-		for i := 0.0; i < math.Pi*2; i += math.Pi / 4 {
-			rr := w * 0.4
-			x := w/2 + math.Sin(i)*rr
-			y := w/2 + math.Cos(i)*rr
-
-			if i == 0 {
-				ctx.Call("moveTo", x, y)
-			} else {
-				ctx.Call("lineTo", x, y)
+				if i == 0 {
+					ctx.Call("moveTo", x, y)
+				} else {
+					ctx.Call("lineTo", x, y)
+				}
 			}
-		}
-		ctx.Call("closePath")
+			ctx.Call("closePath")
 
-		ctx.Call("stroke")
-		ctx.Call("stroke")
-		renderHeart(ctx, w/2, w/2, r)
-	})
+			ctx.Call("stroke")
+			ctx.Call("stroke")
+			renderHeart(ctx, w/2, w/2, r)
+		}),
+	}
 
 	// Enemy type 3 - boss
 	bossR := float64(maxInt(WIDTH, HEIGHT) / 8)
-	g.EnemyTypes[3].R = bossR
-	g.EnemyTypes[3].Image = RenderToCanvas(int(bossR*2), int(bossR*2), func(canvas, ctx *js.Object) {
-		w := canvas.Get("width").Float()
-		h := canvas.Get("height").Float()
+	g.EnemyTypes[Boss] = EnemyType{
+		R: bossR,
+		Image: RenderToCanvas(int(bossR*2), int(bossR*2), func(canvas, ctx *js.Object) {
+			w := canvas.Get("width").Float()
+			h := canvas.Get("height").Float()
 
-		ctx.Set("lineWidth", Theme.EnemyLineWidth)
-		ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
-		ctx.Set("strokeStyle", Theme.EnemyColor)
-		ctx.Set("shadowColor", Theme.EnemyGlow)
-		ctx.Set("miterLimit", 32)
-		ctx.Call("beginPath")
+			ctx.Set("lineWidth", Theme.EnemyLineWidth)
+			ctx.Set("shadowBlur", Theme.DefaultShadowBlur)
+			ctx.Set("strokeStyle", Theme.EnemyColor)
+			ctx.Set("shadowColor", Theme.EnemyGlow)
+			ctx.Set("miterLimit", 32)
+			ctx.Call("beginPath")
 
-		for i := 6; i >= 0; i-- {
-			fi := float64(i)
-			ctx.Call("moveTo", w/2, h*fi/12+6)
-			x1 := w*(11+fi)/18 - 6
-			y1 := h * (25 - fi) / 28
-			ctx.Call("lineTo", x1, y1)
-			x2 := w*(16-fi)/16 - 6
-			y2 := h * (fi + 4) / 28
-			ctx.Call("lineTo", x2, y2)
-			ctx.Call("lineTo", w/2, h*(fi+30)/36-6)
-			ctx.Call("lineTo", w-x2, y2)
-			ctx.Call("lineTo", w-x1, y1)
-			ctx.Call("closePath")
-		}
+			for i := 6; i >= 0; i-- {
+				fi := float64(i)
+				ctx.Call("moveTo", w/2, h*fi/12+6)
+				x1 := w*(11+fi)/18 - 6
+				y1 := h * (25 - fi) / 28
+				ctx.Call("lineTo", x1, y1)
+				x2 := w*(16-fi)/16 - 6
+				y2 := h * (fi + 4) / 28
+				ctx.Call("lineTo", x2, y2)
+				ctx.Call("lineTo", w/2, h*(fi+30)/36-6)
+				ctx.Call("lineTo", w-x2, y2)
+				ctx.Call("lineTo", w-x1, y1)
+				ctx.Call("closePath")
+			}
 
-		ctx.Call("stroke")
-		ctx.Call("stroke")
-		renderHeart(ctx, w/2, h*0.8, bossR)
-	})
+			ctx.Call("stroke")
+			ctx.Call("stroke")
+			renderHeart(ctx, w/2, h*0.8, bossR)
+		}),
+	}
 }
 
 // RenderBonusImage renders a bonus item sprite.

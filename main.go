@@ -27,24 +27,9 @@ func main() {
 	g.Canvas = canvas
 	g.Ctx = ctx
 
-	// Initialize audio
-	g.Audio.Init()
-
-	// Load all sound effects using pure Go jsfxr implementation
-	for i, sfxParams := range game.SfxData {
-		dataURL := game.GenerateWavDataURL(sfxParams)
-		g.Audio.LoadSound(i, dataURL)
-	}
-
-	// Initialize graphics (background, sprites, etc.)
-	g.InitializeGraphics()
-
-	// Setup input handlers
+	g.InitializeAudio()
 	g.SetupInputHandlers()
-
-	// Render title screen
 	g.RenderTitleScreen()
 
-	// Keep program running
 	select {}
 }
